@@ -262,58 +262,66 @@ elif st.session_state.role == "Student":
     
     # --- NATIVE IN-PLACE HIGH-PERFORMANCE VIDEO STREAM LOOP ---
     # Overwrites video_placeholder directly over WebSocket without invoking st.rerun()!
-    while True:
-        analytics = engine.step()
-        frame_idx += 1
-        
-        cei = analytics["cei_score"]
-        att = analytics["attentiveness"]
-        dis = analytics["distraction"]
-        msg = analytics["status_message"]
-        alerts = analytics["alerts"]
-        
-        # 1. Direct Image Placeholder Update (Instant 30+ FPS)
-        video_placeholder.image(analytics["privacy_canvas"], channels="BGR", use_container_width=True)
-        
-        # 2. Update Heartbeat & Telemetry
-        global_state.update_student_presence(
-            room_id=st.session_state.room_id,
-            student_name=st.session_state.username,
-            cei_score=cei,
-            status=msg
-        )
-        
-        st.session_state.telemetry_buffer.append({
-            "timestamp": time.time(),
-            "cei": cei,
-            "attentiveness": att,
-            "distraction": dis,
-            "status": msg
-        })
-        
-        if len(st.session_state.telemetry_buffer) >= 60:
+    try:
+        while True:
+            analytics = engine.step()
+            frame_idx += 1
+            
+            cei = analytics["cei_score"]
+            att = analytics["attentiveness"]
+            dis = analytics["distraction"]
+            msg = analytics["status_message"]
+            alerts = analytics["alerts"]
+            
+            # 1. Direct Image Placeholder Update (Instant 30+ FPS)
+            video_placeholder.image(analytics["privacy_canvas"], channels="BGR", use_container_width=True)
+            
+            # 2. Update Heartbeat & Telemetry
+            global_state.update_student_presence(
+                room_id=st.session_state.room_id,
+                student_name=st.session_state.username,
+                cei_score=cei,
+                status=msg
+            )
+            
+            st.session_state.telemetry_buffer.append({
+                "timestamp": time.time(),
+                "cei": cei,
+                "attentiveness": att,
+                "distraction": dis,
+                "status": msg
+            })
+            
+            # Commit batch every 60 frames (~2 seconds)
+            if len(st.session_state.telemetry_buffer) >= 60:
+                db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
+                st.session_state.telemetry_buffer.clear()
+                
+            # 3. Update Heavy UI Metrics & Line Chart ONLY once per second (every 30 frames)
+            if frame_idx % 30 == 0:
+                col_cei.metric(label="Composite Engagement Index", value=f"{cei * 100:.1f}%")
+                col_att.metric(label="Spatial Attentiveness Focus", value=f"{att * 100:.1f}%")
+                col_dis.metric(label="Environmental Distraction Load", value=f"{dis * 100:.1f}%")
+                
+                badge_class = "status-normal"
+                if len(alerts) > 0:
+                    badge_class = "status-alert"
+                elif dis > 0.2 or att < 0.6:
+                    badge_class = "status-warn"
+                    
+                col_sts.markdown(f'<div class="status-badge {badge_class}">{msg}</div>', unsafe_allow_html=True)
+                
+                st.session_state.cei_history.append(cei)
+                if len(st.session_state.cei_history) > 100:
+                    st.session_state.cei_history.pop(0)
+                    
+                df_trend = pd.DataFrame({"CEI Score": st.session_state.cei_history})
+                chart_placeholder.line_chart(df_trend, height=340)
+                
+            time.sleep(0.03) # Smooth 30 FPS playback throttle
+    finally:
+        # Guarantee any uncommitted telemetry in buffer is persisted on exit
+        if st.session_state.active_session_id is not None and len(st.session_state.telemetry_buffer) > 0:
             db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
             st.session_state.telemetry_buffer.clear()
-            
-        # 3. Update Heavy UI Metrics & Line Chart ONLY once per second (every 30 frames)
-        if frame_idx % 30 == 0:
-            col_cei.metric(label="Composite Engagement Index", value=f"{cei * 100:.1f}%")
-            col_att.metric(label="Spatial Attentiveness Focus", value=f"{att * 100:.1f}%")
-            col_dis.metric(label="Environmental Distraction Load", value=f"{dis * 100:.1f}%")
-            
-            badge_class = "status-normal"
-            if len(alerts) > 0:
-                badge_class = "status-alert"
-            elif dis > 0.2 or att < 0.6:
-                badge_class = "status-warn"
-                
-            col_sts.markdown(f'<div class="status-badge {badge_class}">{msg}</div>', unsafe_allow_html=True)
-            
-            st.session_state.cei_history.append(cei)
-            if len(st.session_state.cei_history) > 100:
-                st.session_state.cei_history.pop(0)
-                
-            df_trend = pd.DataFrame({"CEI Score": st.session_state.cei_history})
-            chart_placeholder.line_chart(df_trend, height=340)
-            
-        time.sleep(0.03) # Smooth 30 FPS playback throttle
+
