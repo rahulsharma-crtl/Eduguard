@@ -17,10 +17,10 @@ class SystemConfig:
     
     # Frame skipping ratios
     SPATIAL_FRAME_SKIP: int = 1   
-    OBJECT_FRAME_SKIP: int = 10   
+    OBJECT_FRAME_SKIP: int = 5   
 
     # Temporal Window Settings
-    TEMPORAL_WINDOW_SIZE: int = 100  
+    TEMPORAL_WINDOW_SIZE: int = 30  
     
     # Thresholds
     EAR_THRESHOLD: float = 0.21      
@@ -31,13 +31,13 @@ class SystemConfig:
     MODEL_DIR: str = os.path.join(os.path.dirname(__file__), "models")
     YOLO_WEIGHTS_NAME: str = "yolov8n.pt"
     YOLO_WEIGHTS_PATH: str = os.path.join(MODEL_DIR, YOLO_WEIGHTS_NAME)
-    YOLO_CONFIDENCE_THRESH: float = 0.45
+    YOLO_CONFIDENCE_THRESH: float = 0.30
     TARGET_CLASSES: tuple = (0, 67, 73)
 
     # CEI Weights: E = (W1 * P) + (W2 * A) - (W3 * D)
     WEIGHT_PRESENCE: float = 0.30
-    WEIGHT_ATTENTIVENESS: float = 0.50
-    WEIGHT_DISTRACTION: float = 0.20
+    WEIGHT_ATTENTIVENESS: float = 0.45
+    WEIGHT_DISTRACTION: float = 0.25
 
     # Aesthetics
     THEME_PRIMARY_COLOR: str = "#4E6BFF"

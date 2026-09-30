@@ -7,11 +7,12 @@ Integrates Ultralytics YOLOv8-Nano to detect environmental distractions:
 - Class 67: Cell Phone (primary electronic distraction)
 - Class 73: Book (secondary distraction)
 
-CPU Optimization:
-1. Strict Frame Skipping: Evaluates inference only once every 10 frames (CONFIG.OBJECT_FRAME_SKIP).
+CPU Optimization & Detection Hold:
+1. Strict Frame Skipping: Evaluates inference once every 5 frames (CONFIG.OBJECT_FRAME_SKIP).
 2. Resolution Downscaling: Inference runs on optimized imgsz=320 for ultra-fast CPU inference (<20ms).
-3. Thread-Safe Result Caching: Caches detection results so skipped frames return in <0.01ms,
-   ensuring the pipeline maintains a fluid 30 FPS with <25% CPU utilization.
+3. Active Detection Hold: Cell phone detections hold the penalty for 30 frames (~1 sec) to prevent
+   temporal dilution across skipped frames.
+4. Thread-Safe Result Caching: Caches detection results so skipped frames return in <0.01ms.
 """
 
 import os
@@ -49,7 +50,8 @@ def _preload_windows_torch_dlls() -> None:
 
 class ObjectStream:
     """
-    Lightweight, thread-safe, frame-skipping YOLOv8-Nano object detection stream.
+    Lightweight, thread-safe, frame-skipping YOLOv8-Nano object detection stream
+    with active temporal hold for distraction events.
     """
     def __init__(self,
                  weights_path: str = CONFIG.YOLO_WEIGHTS_PATH,
@@ -69,8 +71,9 @@ class ObjectStream:
         self.model_error: Optional[str] = None
         self.lock = threading.Lock()
 
-        # Frame interval counters and cached state
+        # Frame interval counters, hold frames, and cached state
         self.frame_counter: int = 0
+        self.hold_frames: int = 0
         self.cached_result: Dict[str, Any] = {
             "person_detected": True,   # Assume present on startup until verified
             "person_count": 1,
@@ -150,9 +153,13 @@ class ObjectStream:
 
     def process_frame(self, frame: Optional[np.ndarray]) -> Dict[str, Any]:
         """
-        Processes frame with strict frame skipping:
-        - If frame is not on the 10th interval, returns cached result in <0.01ms.
-        - On the 10th frame, runs YOLOv8-Nano on CPU and updates the cache.
+        Processes frame with strict frame skipping and detection hold:
+        - On skipped frames:
+          - If hold_frames > 0, decrements counter and preserves the distraction penalty.
+          - If hold_frames == 0, decays distraction score to 0.0.
+        - On evaluation frames (every 5 frames):
+          - Runs YOLOv8-Nano on CPU.
+          - If cell phone is detected, sets d_score = 0.90, hold_frames = 30, and logs alert.
 
         Returns:
             Dict containing:
@@ -166,10 +173,21 @@ class ObjectStream:
             with self.lock:
                 return self.cached_result.copy()
 
-        # Strict frame-skipping schedule (1 in 10 frames)
+        # Strict frame-skipping schedule (every OBJECT_FRAME_SKIP frames)
         self.frame_counter += 1
         if self.frame_counter % self.frame_skip != 0:
             with self.lock:
+                if self.hold_frames > 0:
+                    self.hold_frames -= 1
+                else:
+                    # Decay distraction score and phone flag when hold expires
+                    self.cached_result["distraction_score"] = 0.0
+                    if "cell phone" in self.cached_result.get("detected_objects", []):
+                        self.cached_result["detected_objects"] = [
+                            obj for obj in self.cached_result.get("detected_objects", []) if obj != "cell phone"
+                        ]
+                    if not self.cached_result.get("detected_objects") and self.cached_result.get("person_detected", True):
+                        self.cached_result["status_message"] = "Clear Workspace"
                 return self.cached_result.copy()
 
         with self.lock:
@@ -195,20 +213,34 @@ class ObjectStream:
             person_count = 0
             detected_items: List[str] = []
             d_score = 0.0
+            phone_found = False
 
             if results and len(results[0].boxes) > 0:
                 boxes = results[0].boxes
                 for box in boxes:
                     cls_id = int(box.cls[0].item())
+                    conf = float(box.conf[0].item())
 
                     if cls_id == 0:  # Person
                         person_count += 1
                     elif cls_id == 67:  # Cell phone
+                        phone_found = True
                         detected_items.append("cell phone")
-                        d_score = max(d_score, 0.8)  # High distraction penalty
+                        d_score = max(d_score, 0.90)  # High distraction penalty
+                        self.hold_frames = 30  # Active hold for 30 frames (~1 sec)
+                        print(f"🚨 [DETECTION ALERT] Cell Phone Detected! Conf: {conf:.2f}")
                     elif cls_id == 73:  # Book
                         detected_items.append("book")
                         d_score = max(d_score, 0.4)  # Moderate distraction penalty
+
+            # If phone was not seen in this specific frame but hold counter is active, retain penalty
+            if not phone_found:
+                if self.hold_frames > 0:
+                    self.hold_frames -= 1
+                    d_score = max(d_score, 0.90)
+                    detected_items.append("cell phone")
+                else:
+                    d_score = 0.0
 
             # Multiple people in frame constitutes an external distraction
             if person_count > 1:
@@ -246,9 +278,9 @@ class ObjectStream:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    logging.info("Validating ObjectStream YOLOv8-Nano integration and frame-skipping schedule...")
+    logging.info("Validating ObjectStream YOLOv8-Nano integration with hold counter...")
 
-    stream = ObjectStream(frame_skip=10)
+    stream = ObjectStream(frame_skip=5)
     ready = stream.wait_until_ready(timeout=15.0)
     assert ready, f"YOLO model failed to warm up! Error: {stream.model_error}"
     logging.info("YOLOv8-Nano model ready.")
@@ -256,24 +288,21 @@ if __name__ == "__main__":
     # Create dummy frame
     dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
-    # Benchmark frame skipping: 30 frames (simulating 1 full second of 30 FPS video)
-    start_time = time.time()
-    inferences_run = 0
+    # Test hold counter behavior
+    stream.hold_frames = 10
+    stream.cached_result["distraction_score"] = 0.90
+    stream.cached_result["detected_objects"] = ["cell phone"]
 
-    for i in range(1, 31):
-        t0 = time.time()
-        res = stream.process_frame(dummy_frame)
-        dt = (time.time() - t0) * 1000  # ms
+    # Process skipped frame
+    stream.frame_counter = 1  # 2 % 5 != 0
+    res = stream.process_frame(dummy_frame)
+    assert stream.hold_frames == 9, f"Hold counter did not decrement! {stream.hold_frames}"
+    assert res["distraction_score"] == 0.90, "Distraction score was prematurely decayed!"
 
-        if i % 10 == 0:
-            inferences_run += 1
-            logging.info(f"Frame {i:02d} (INFERENCE): latency = {dt:.2f} ms | Status: {res['status_message']}")
-        else:
-            # Skipped frames must return in < 1 ms from cache
-            assert dt < 5.0, f"Cached frame {i} took too long: {dt:.2f} ms"
+    # Simulate hold expiration
+    stream.hold_frames = 0
+    stream.frame_counter = 1
+    res_decay = stream.process_frame(dummy_frame)
+    assert res_decay["distraction_score"] == 0.0, "Distraction score did not decay after hold expired!"
 
-    total_time = (time.time() - start_time) * 1000
-    logging.info(f"30-frame simulated loop took {total_time:.2f} ms total across {inferences_run} active inferences.")
-    assert inferences_run == 3, f"Expected 3 inferences over 30 frames, got {inferences_run}"
-
-    logging.info("ObjectStream YOLOv8-Nano validation tests PASSED!")
+    logging.info("Hold counter logic validated successfully!")

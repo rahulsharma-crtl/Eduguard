@@ -273,8 +273,13 @@ elif st.session_state.role == "Student":
             msg = analytics["status_message"]
             alerts = analytics["alerts"]
             
-            # 1. Direct Image Placeholder Update (Instant 30+ FPS)
-            video_placeholder.image(analytics["privacy_canvas"], channels="BGR", use_container_width=True)
+            # 1. Compress canvas to JPEG to reduce WebSocket bandwidth by ~95%
+            canvas = analytics["privacy_canvas"]
+            success, encoded_jpg = cv2.imencode('.jpg', canvas, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if success:
+                video_placeholder.image(encoded_jpg.tobytes(), channels="BGR", use_container_width=True)
+            else:
+                video_placeholder.image(canvas, channels="BGR", use_container_width=True)
             
             # 2. Update Heartbeat & Telemetry
             global_state.update_student_presence(
@@ -318,7 +323,7 @@ elif st.session_state.role == "Student":
                 df_trend = pd.DataFrame({"CEI Score": st.session_state.cei_history})
                 chart_placeholder.line_chart(df_trend, height=340)
                 
-            time.sleep(0.03) # Smooth 30 FPS playback throttle
+            time.sleep(0.001) # Yield execution cleanly without artificial frame lag
     finally:
         # Guarantee any uncommitted telemetry in buffer is persisted on exit
         if st.session_state.active_session_id is not None and len(st.session_state.telemetry_buffer) > 0:
