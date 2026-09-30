@@ -7,18 +7,20 @@ routes intermediate spatial/object representations, applies temporal smoothing,
 and evaluates the definitive mathematical formulation to grade continuous engagement.
 """
 
-import numpy as np
-from typing import Dict, Any, Optional
-import logging
-
 import sys
 import os
+import logging
+from typing import Dict, Any, Optional
+import cv2
+import numpy as np
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from config import CONFIG
 from core.webcam_manager import WebcamManager
+# CRITICAL: ObjectStream (PyTorch) MUST be imported BEFORE PrivacyLayer (MediaPipe) on Windows
+from core.object_stream import ObjectStream
 from core.privacy_layer import PrivacyLayer
 from core.spatial_stream import SpatialStream
-from core.object_stream import ObjectStream
 from core.temporal_stream import TemporalStream
 
 
@@ -29,12 +31,13 @@ class CEIEngine:
     def __init__(self, managed_webcam: Optional[WebcamManager] = None):
         self.webcam = managed_webcam if managed_webcam is not None else WebcamManager()
         self.owns_webcam = managed_webcam is None
-        
+
+        # Instantiate streams in order (ObjectStream loads PyTorch first)
+        self.object_stream = ObjectStream()
         self.privacy_layer = PrivacyLayer()
         self.spatial_stream = SpatialStream()
-        self.object_stream = ObjectStream()
         self.temporal_stream = TemporalStream()
-        
+
         self.is_running: bool = False
         self.blank_canvas = np.zeros((CONFIG.FRAME_HEIGHT, CONFIG.FRAME_WIDTH, 3), dtype=np.uint8)
 
@@ -44,7 +47,10 @@ class CEIEngine:
             if not self.webcam.start():
                 logging.error("Failed to allocate physical camera hardware path.")
                 return False
-                
+
+        # Ensure object stream model is fully pre-warmed and ready
+        self.object_stream.wait_until_ready(timeout=10.0)
+
         self.is_running = True
         self.temporal_stream.reset()
         return True
@@ -88,7 +94,37 @@ class CEIEngine:
             inst_presence = 0.0
             inst_attentiveness = 0.0
 
-        # Step 4: Temporal smoothing
+        # Step 4: Overlay detected object HUD bounding boxes onto privacy canvas
+        # Visual cues for distraction while strictly preserving facial/environment privacy
+        for det in object_metrics.get("bounding_boxes", []):
+            box = det["box"]
+            cls_name = det["name"]
+            conf = det["conf"]
+            x1, y1, x2, y2 = box
+
+            if cls_name == "cell phone":
+                color = (40, 40, 255)  # Vivid neon red
+                label = f"ALERT: CELL PHONE [{conf*100:.0f}%]"
+            elif cls_name == "book":
+                color = (0, 180, 255)  # Vivid neon amber
+                label = f"BOOK [{conf*100:.0f}%]"
+            else:
+                color = (255, 120, 200)
+                label = f"{cls_name.upper()} [{conf*100:.0f}%]"
+
+            cv2.rectangle(privacy_canvas, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
+            cv2.putText(
+                privacy_canvas,
+                label,
+                (x1, max(y1 - 8, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                color,
+                2,
+                cv2.LINE_AA
+            )
+
+        # Step 5: Temporal smoothing
         smoothed = self.temporal_stream.smooth(
             attentiveness=inst_attentiveness,
             distraction=inst_distraction,
@@ -99,11 +135,11 @@ class CEIEngine:
         s_attentiveness = smoothed["smoothed_attentiveness"]
         s_distraction = smoothed["smoothed_distraction"]
 
-        # Step 5: CEI Formula: E = (W1 * P) + (W2 * A) - (W3 * D)
+        # Step 6: CEI Formula: E = (W1 * P) + (W2 * A) - (W3 * D)
         raw_cei = (CONFIG.WEIGHT_PRESENCE * s_presence) + \
                   (CONFIG.WEIGHT_ATTENTIVENESS * s_attentiveness) - \
                   (CONFIG.WEIGHT_DISTRACTION * s_distraction)
-                  
+
         cei_score = max(0.0, min(1.0, float(raw_cei)))
 
         alerts = []

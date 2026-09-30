@@ -1,11 +1,26 @@
-"""
-EduGuard Cloud: Production Streamlit Architecture (app.py)
+import sys
+import os
+import ctypes
 
-Key Optimization:
-Replaces volatile script-level `st.rerun()` loops with a native in-place 
-container stream loop (`while True` updating `st.empty()`). 
-Eliminates DOM re-mounting, script execution lag, and browser flickering entirely.
-"""
+# CRITICAL WINDOWS DLL PRELOAD FOR TORCH/YOLO
+# On Windows, PyTorch native C++ DLLs (c10.dll, libiomp5md.dll) MUST be preloaded 
+# and imported BEFORE MediaPipe or OpenCV load conflicting runtimes.
+if sys.platform == "win32":
+    torch_lib = os.path.join(sys.prefix, "Lib", "site-packages", "torch", "lib")
+    if os.path.exists(torch_lib):
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(torch_lib)
+            except Exception:
+                pass
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        for dll_name in ["libiomp5md.dll", "c10.dll", "torch_cpu.dll", "torch.dll", "torch_python.dll"]:
+            dll_p = os.path.join(torch_lib, dll_name)
+            if os.path.exists(dll_p):
+                kernel32.LoadLibraryExW(dll_p, None, 0x00000008)
+
+import torch
+from ultralytics import YOLO
 
 import streamlit as st
 import numpy as np
@@ -13,8 +28,6 @@ import pandas as pd
 import time
 import logging
 import cv2
-import sys
-import os
 import uuid
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -177,6 +190,7 @@ if st.session_state.role == "Teacher":
         df_sess = pd.DataFrame(sessions)
         df_sess['start_time'] = pd.to_datetime(df_sess['start_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
         df_sess['end_time'] = pd.to_datetime(df_sess['end_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
+        df_sess['avg_cei'] = df_sess['avg_cei'].fillna(0.0)
         st.dataframe(df_sess.style.format({"avg_cei": "{:.1%}"}), use_container_width=True)
         
         selected_session = st.selectbox("Select Session ID for Export", [s["session_id"] for s in sessions])
@@ -302,20 +316,22 @@ elif st.session_state.role == "Student":
                 db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
                 st.session_state.telemetry_buffer.clear()
                 
-            # 3. Update Heavy UI Metrics & Line Chart ONLY once per second (every 30 frames)
-            if frame_idx % 30 == 0:
+            # 3. Update UI Metrics Responsively (every 5 frames or instantly on alert)
+            if frame_idx % 5 == 0 or len(alerts) > 0 or dis > 0.05:
                 col_cei.metric(label="Composite Engagement Index", value=f"{cei * 100:.1f}%")
                 col_att.metric(label="Spatial Attentiveness Focus", value=f"{att * 100:.1f}%")
                 col_dis.metric(label="Environmental Distraction Load", value=f"{dis * 100:.1f}%")
                 
                 badge_class = "status-normal"
-                if len(alerts) > 0:
+                if len(alerts) > 0 or dis >= 0.5:
                     badge_class = "status-alert"
-                elif dis > 0.2 or att < 0.6:
+                elif dis > 0.15 or att < 0.6:
                     badge_class = "status-warn"
                     
                 col_sts.markdown(f'<div class="status-badge {badge_class}">{msg}</div>', unsafe_allow_html=True)
                 
+            # 4. Update Dynamic CEI Line Chart every 15 frames (~500ms)
+            if frame_idx % 15 == 0:
                 st.session_state.cei_history.append(cei)
                 if len(st.session_state.cei_history) > 100:
                     st.session_state.cei_history.pop(0)

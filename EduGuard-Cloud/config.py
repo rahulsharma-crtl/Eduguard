@@ -31,7 +31,7 @@ class SystemConfig:
     MODEL_DIR: str = os.path.join(os.path.dirname(__file__), "models")
     YOLO_WEIGHTS_NAME: str = "yolov8n.pt"
     YOLO_WEIGHTS_PATH: str = os.path.join(MODEL_DIR, YOLO_WEIGHTS_NAME)
-    YOLO_CONFIDENCE_THRESH: float = 0.30
+    YOLO_CONFIDENCE_THRESH: float = 0.25
     TARGET_CLASSES: tuple = (0, 67, 73)
 
     # CEI Weights: E = (W1 * P) + (W2 * A) - (W3 * D)
