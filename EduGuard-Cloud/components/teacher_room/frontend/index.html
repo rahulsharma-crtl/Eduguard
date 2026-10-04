@@ -113,11 +113,12 @@
             100% { transform: scale(0.95); opacity: 0.8; }
         }
 
-        /* Video Showcase Layout */
+        /* Stage Layout */
         .video-stage {
             display: grid;
-            grid-template-columns: 380px 1fr;
+            grid-template-columns: 1fr 1fr;
             gap: 16px;
+            align-items: start;
         }
 
         @media (max-width: 900px) {
@@ -155,7 +156,7 @@
             position: relative;
             background: #000;
             width: 100%;
-            aspect-ratio: 4 / 3;
+            aspect-ratio: 16 / 9;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -221,8 +222,8 @@
             color: #f87171;
         }
 
-        /* Students Section */
-        .students-section {
+        /* Participant Roster Section (Zero Inbound Video - Low Overhead & Privacy-First) */
+        .roster-section {
             background: var(--surface-color);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-md);
@@ -233,21 +234,21 @@
             min-height: 280px;
         }
 
-        .students-header {
+        .roster-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            padding-bottom: 8px;
+            padding-bottom: 10px;
         }
 
-        .students-header h3 {
+        .roster-header h3 {
             font-size: 0.95rem;
             color: var(--text-main);
             font-weight: 600;
         }
 
-        .students-count {
+        .roster-count {
             font-size: 0.8rem;
             color: var(--text-dim);
             background: rgba(255, 255, 255, 0.05);
@@ -255,104 +256,121 @@
             border-radius: 12px;
         }
 
-        /* Dynamic Expanding Grid */
-        #students_grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 12px;
-            width: 100%;
+        .roster-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 380px;
+            overflow-y: auto;
         }
 
-        .empty-grid-msg {
-            grid-column: 1 / -1;
+        .empty-roster-msg {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            padding: 40px 10px;
+            padding: 36px 10px;
             color: var(--text-dim);
             font-size: 0.9rem;
             border: 2px dashed rgba(255, 255, 255, 0.08);
             border-radius: var(--radius-md);
         }
 
-        .student-tile {
-            position: relative;
-            background: #000;
+        .roster-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(22, 27, 34, 0.85);
             border: 1px solid rgba(78, 107, 255, 0.2);
             border-radius: var(--radius-sm);
-            overflow: hidden;
-            aspect-ratio: 4 / 3;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            transition: transform 0.2s ease, border-color 0.2s ease;
+            padding: 10px 14px;
+            transition: all 0.2s ease;
         }
 
-        .student-tile:hover {
+        .roster-card:hover {
             border-color: var(--primary-accent);
-            transform: translateY(-2px);
+            background: rgba(78, 107, 255, 0.06);
         }
 
-        .student-tile video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+        .roster-student-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .student-tile-tag {
-            position: absolute;
-            bottom: 6px;
-            left: 6px;
-            background: rgba(14, 17, 23, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
+        .roster-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: rgba(78, 107, 255, 0.15);
+            border: 1px solid var(--primary-accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+        }
+
+        .roster-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .roster-name {
+            font-size: 0.92rem;
+            font-weight: 700;
             color: #fff;
-            max-width: 85%;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            backdrop-filter: blur(4px);
-            z-index: 5;
+        }
+
+        .roster-conn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: var(--success-color);
+        }
+
+        .roster-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--success-color);
+            display: inline-block;
         }
 
         /* Real-Time Floating CEI Telemetry Badge */
         .student-telemetry-badge {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            padding: 3px 8px;
-            border-radius: 6px;
-            font-size: 0.72rem;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 0.76rem;
             font-weight: 700;
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 6px;
             backdrop-filter: blur(6px);
             transition: all 0.3s ease;
-            z-index: 10;
         }
 
         .badge-attentive {
             background: rgba(34, 197, 94, 0.25);
             border: 1px solid var(--success-color);
             color: #4ade80;
-            box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
         }
 
         .badge-warning {
             background: rgba(250, 204, 21, 0.25);
             border: 1px solid var(--warn-color);
             color: #facc15;
-            box-shadow: 0 0 10px rgba(250, 204, 21, 0.3);
+            box-shadow: 0 0 10px rgba(250, 204, 21, 0.2);
         }
 
         .badge-alert {
             background: rgba(239, 68, 68, 0.3);
             border: 1px solid var(--danger-color);
             color: #f87171;
-            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
             animation: pulse 1.5s infinite;
         }
     </style>
@@ -397,17 +415,17 @@
                 </div>
             </div>
 
-            <!-- Right: Expanding Student Grid -->
-            <div class="students-section">
-                <div class="students-header">
-                    <h3>👥 Live Student Stream Grid</h3>
-                    <span id="students_count_badge" class="students-count">0 Connected</span>
+            <!-- Right: Student Participant Roster (Zero Video Decoding Overhead) -->
+            <div class="roster-section">
+                <div class="roster-header">
+                    <h3>👥 Live Participant Roster</h3>
+                    <span id="students_count_badge" class="roster-count">0 Connected</span>
                 </div>
-                <div id="students_grid">
-                    <div class="empty-grid-msg" id="empty_grid_msg">
+                <div id="roster_container" class="roster-list">
+                    <div class="empty-roster-msg" id="empty_roster_msg">
                         <span style="font-size: 1.6rem;">🎓</span>
                         <span>Waiting for students to join room...</span>
-                        <span style="font-size: 0.75rem; color: #586069;">Incoming WebRTC streams & telemetry badges will populate here dynamically.</span>
+                        <span style="font-size: 0.75rem; color: #586069;">Connected students & real-time attention badges appear here.</span>
                     </div>
                 </div>
             </div>
@@ -444,8 +462,8 @@
         const statusText = document.getElementById("status_text");
         const roomBadge = document.getElementById("room_badge");
         const peerIdLabel = document.getElementById("peer_id_label");
-        const studentsGrid = document.getElementById("students_grid");
-        const emptyGridMsg = document.getElementById("empty_grid_msg");
+        const rosterContainer = document.getElementById("roster_container");
+        const emptyRosterMsg = document.getElementById("empty_roster_msg");
         const studentsCountBadge = document.getElementById("students_count_badge");
 
         const toggleMicBtn = document.getElementById("toggle_mic_btn");
@@ -524,20 +542,20 @@
                     call.answer();
                 }
 
-                // Handle student's incoming media stream
+                // Handle student's incoming media stream (Zero Video Decoding - Audio Only)
                 call.on("stream", (remoteStream) => {
                     console.log(`Received student stream from ${call.peer}`);
-                    renderStudentTile(call.peer, remoteStream, call);
+                    renderStudentRoster(call.peer, remoteStream, call);
                 });
 
                 call.on("close", () => {
                     console.log(`Student call closed: ${call.peer}`);
-                    removeStudentTile(call.peer);
+                    removeStudentRoster(call.peer);
                 });
 
                 call.on("error", (err) => {
                     console.warn(`Call error from ${call.peer}:`, err);
-                    removeStudentTile(call.peer);
+                    removeStudentRoster(call.peer);
                 });
             });
 
@@ -552,45 +570,57 @@
             });
         }
 
-        // Render Student Video in Dynamic Expanding Grid with Floating Telemetry Badge
-        function renderStudentTile(peerId, stream, call) {
-            removeStudentTile(peerId);
+        // Render Student in Participant Roster (Zero Video Elements, Low CPU/Bandwidth)
+        function renderStudentRoster(peerId, stream, call) {
+            removeStudentRoster(peerId);
 
-            if (emptyGridMsg) {
-                emptyGridMsg.style.display = "none";
+            if (emptyRosterMsg) {
+                emptyRosterMsg.style.display = "none";
             }
 
-            const tile = document.createElement("div");
-            tile.className = "student-tile";
-            tile.id = `tile_${peerId}`;
+            const card = document.createElement("div");
+            card.className = "roster-card";
+            card.id = `roster_${peerId}`;
 
-            const vid = document.createElement("video");
-            vid.autoplay = true;
-            vid.playsInline = true;
-            vid.srcObject = stream;
+            // Optional hidden audio element so teacher can hear unmuted student audio
+            if (stream && stream.getAudioTracks && stream.getAudioTracks().length > 0) {
+                const audioElem = document.createElement("audio");
+                audioElem.autoplay = true;
+                audioElem.playsInline = true;
+                audioElem.srcObject = stream;
+                audioElem.style.display = "none";
+                card.appendChild(audioElem);
+            }
 
-            const tag = document.createElement("div");
-            tag.className = "student-tile-tag";
             let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
-            tag.innerText = `🧑‍🎓 ${displayName || peerId}`;
+            displayName = displayName.replace(/-[0-9]{3,5}$/, "");
 
-            // Floating Real-Time CEI & Engagement Status Badge
+            const infoDiv = document.createElement("div");
+            infoDiv.className = "roster-student-info";
+            infoDiv.innerHTML = `
+                <div class="roster-avatar">🧑‍🎓</div>
+                <div class="roster-meta">
+                    <span class="roster-name">${displayName || "Student"}</span>
+                    <span class="roster-conn"><span class="roster-dot"></span> Online</span>
+                </div>
+            `;
+
+            // Real-Time Attention Badge
             const badge = document.createElement("div");
             badge.className = "student-telemetry-badge badge-attentive";
             badge.id = `badge-${peerId}`;
             badge.innerHTML = `<span>🎯 100% | Attentive</span>`;
 
-            tile.appendChild(vid);
-            tile.appendChild(tag);
-            tile.appendChild(badge);
-            studentsGrid.appendChild(tile);
+            card.appendChild(infoDiv);
+            card.appendChild(badge);
+            rosterContainer.appendChild(card);
 
-            connectedStudents.set(peerId, { call, stream, element: tile, badge });
+            connectedStudents.set(peerId, { call, stream, element: card, badge, studentName: displayName });
             updateStudentCount();
             resizeIframe();
         }
 
-        function removeStudentTile(peerId) {
+        function removeStudentRoster(peerId) {
             if (connectedStudents.has(peerId)) {
                 const item = connectedStudents.get(peerId);
                 if (item.element && item.element.parentNode) {
@@ -601,8 +631,8 @@
                 resizeIframe();
             }
 
-            if (connectedStudents.size === 0 && emptyGridMsg) {
-                emptyGridMsg.style.display = "flex";
+            if (connectedStudents.size === 0 && emptyRosterMsg) {
+                emptyRosterMsg.style.display = "flex";
             }
         }
 
@@ -610,11 +640,11 @@
         function updateStudentTelemetryBadge(peerId, data) {
             let badge = document.getElementById(`badge-${peerId}`);
             if (!badge) {
-                // Fuzzy match tile by student name if peer ID is slightly modified
-                const tiles = document.querySelectorAll(".student-tile");
-                for (const t of tiles) {
-                    if (t.id.includes(peerId) || (data.studentName && t.id.includes(data.studentName))) {
-                        badge = t.querySelector(".student-telemetry-badge");
+                // Search inside roster cards
+                const cards = document.querySelectorAll(".roster-card");
+                for (const c of cards) {
+                    if (c.id.includes(peerId) || (data.studentName && c.id.includes(data.studentName))) {
+                        badge = c.querySelector(".student-telemetry-badge");
                         break;
                     }
                 }

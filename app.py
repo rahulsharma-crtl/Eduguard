@@ -103,6 +103,8 @@ if "telemetry_buffer" not in st.session_state:
     st.session_state.telemetry_buffer = []
 if "engine" not in st.session_state:
     st.session_state.engine = None
+if "session_ended" not in st.session_state:
+    st.session_state.session_ended = False
 
 
 # ==========================================
@@ -160,63 +162,84 @@ elif room_from_url is not None and st.session_state.role != "Student":
 # TEACHER DASHBOARD VIEW
 # ==========================================
 if st.session_state.role == "Teacher":
-    st.sidebar.markdown(f"### 👨‍🏫 Teacher Console")
-    st.sidebar.success(f"Classroom: {st.session_state.room_id}")
-    
-    if st.sidebar.button("Logout / End Class Session"):
-        st.session_state.role = None
-        st.query_params.clear()
-        st.rerun()
+    if st.session_state.get("session_ended", False):
+        st.sidebar.markdown("### 👨‍🏫 Teacher Console")
+        st.sidebar.info(f"Classroom `{st.session_state.room_id}` Concluded")
+        if st.sidebar.button("🔄 Return to Login / New Classroom", type="primary", use_container_width=True):
+            st.session_state.session_ended = False
+            st.session_state.role = None
+            st.session_state.room_id = None
+            st.query_params.clear()
+            st.rerun()
 
-    # Shareable Student Link
-    full_student_url = f"http://localhost:8501/?room={st.session_state.room_id}"
-    st.markdown("### 📋 Student Shareable Link")
-    st.text_input("Copy this FULL link and send it to your students:", value=full_student_url, key="share_link_box")
-    st.caption("Students opening this link will bypass login and directly enter the Privacy Mesh session.")
-    
-    st.divider()
-    
-    # Live Classroom Video Broadcast (WebRTC Peer Room with Live Telemetry Badges)
-    st.markdown("### 🎥 Live Classroom Broadcast & Video Room")
-    live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
-    teacher_room(st.session_state.room_id, live_students=live_students, key="teacher_broadcast_component")
-    
-    st.divider()
-    
-    # Teacher Dashboard Grid (Auto-refreshes metrics without disrupting WebRTC video)
-    @st.fragment(run_every="3s")
-    def render_teacher_telemetry():
+        summary_ledger = db.get_room_session_summary_ledger(st.session_state.room_id)
+        dashboard_ui.render_session_summary_ledger(summary_ledger, st.session_state.room_id)
+
+        st.divider()
+        if st.button("⬅️ Exit to Login Screen"):
+            st.session_state.session_ended = False
+            st.session_state.role = None
+            st.session_state.room_id = None
+            st.query_params.clear()
+            st.rerun()
+
+    else:
+        st.sidebar.markdown(f"### 👨‍🏫 Teacher Console")
+        st.sidebar.success(f"Classroom: {st.session_state.room_id}")
+        
+        if st.sidebar.button("🛑 Logout / End Class Session", type="primary", use_container_width=True):
+            st.session_state.session_ended = True
+            st.rerun()
+
+        # Shareable Student Link
+        full_student_url = f"http://localhost:8501/?room={st.session_state.room_id}"
+        st.markdown("### 📋 Student Shareable Link")
+        st.text_input("Copy this FULL link and send it to your students:", value=full_student_url, key="share_link_box")
+        st.caption("Students opening this link will bypass login and directly enter the Privacy Mesh session.")
+        
+        st.divider()
+        
+        # Live Classroom Video Broadcast (WebRTC Peer Room with Zero Video Decode Participant Roster)
+        st.markdown("### 🎥 Live Classroom Broadcast & Participant Roster")
         live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
-        total_joined = global_state.get_total_joined_students(st.session_state.room_id)
-        dashboard_ui.render_teacher_dashboard(live_students, total_joined)
+        teacher_room(st.session_state.room_id, live_students=live_students, key="teacher_broadcast_component")
         
-    render_teacher_telemetry()
-    
-    st.divider()
-    
-    # Completed Session CSV Export Table
-    st.markdown("### 📥 Completed Session CSV Reports")
-    sessions = db.get_all_sessions(room_id=st.session_state.room_id)
-    
-    if sessions:
-        df_sess = pd.DataFrame(sessions)
-        df_sess['start_time'] = pd.to_datetime(df_sess['start_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
-        df_sess['end_time'] = pd.to_datetime(df_sess['end_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
-        df_sess['avg_cei'] = df_sess['avg_cei'].fillna(0.0)
-        st.dataframe(df_sess.style.format({"avg_cei": "{:.1%}"}), use_container_width=True)
+        st.divider()
         
-        selected_session = st.selectbox("Select Session ID for Export", [s["session_id"] for s in sessions])
-        if st.button("Generate CSV Report", type="primary"):
-            csv_data = generate_csv_report(db, selected_session)
-            if csv_data:
-                st.success("Report Compiled!")
-                st.download_button(
-                    label=f"⬇️ Download Session {selected_session} Telemetry CSV",
-                    data=csv_data,
-                    file_name=f"eduguard_session_{selected_session}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+        # Teacher Dashboard Grid (Auto-refreshes metrics without disrupting WebRTC video)
+        @st.fragment(run_every="3s")
+        def render_teacher_telemetry():
+            live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
+            total_joined = global_state.get_total_joined_students(st.session_state.room_id)
+            dashboard_ui.render_teacher_dashboard(live_students, total_joined)
+            
+        render_teacher_telemetry()
+        
+        st.divider()
+        
+        # Completed Session CSV Export Table
+        st.markdown("### 📥 Completed Session CSV Reports")
+        sessions = db.get_all_sessions(room_id=st.session_state.room_id)
+        
+        if sessions:
+            df_sess = pd.DataFrame(sessions)
+            df_sess['start_time'] = pd.to_datetime(df_sess['start_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
+            df_sess['end_time'] = pd.to_datetime(df_sess['end_time'], unit='s').dt.strftime('%Y-%m-%d %H:%M:%S')
+            df_sess['avg_cei'] = df_sess['avg_cei'].fillna(0.0)
+            st.dataframe(df_sess.style.format({"avg_cei": "{:.1%}"}), use_container_width=True)
+            
+            selected_session = st.selectbox("Select Session ID for Export", [s["session_id"] for s in sessions])
+            if st.button("Generate CSV Report", type="primary"):
+                csv_data = generate_csv_report(db, selected_session)
+                if csv_data:
+                    st.success("Report Compiled!")
+                    st.download_button(
+                        label=f"⬇️ Download Session {selected_session} Telemetry CSV",
+                        data=csv_data,
+                        file_name=f"eduguard_session_{selected_session}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
 
 
 # ==========================================

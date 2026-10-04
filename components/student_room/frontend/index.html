@@ -120,14 +120,15 @@
             100% { transform: scale(0.95); opacity: 0.8; }
         }
 
-        /* Dual-Pane Conference Stage */
+        /* Dual-Pane Conference Stage (75% Teacher Broadcast / 25% Student Privacy Mesh) */
         .stage-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 3fr 1fr;
             gap: 16px;
+            align-items: start;
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 960px) {
             .stage-grid {
                 grid-template-columns: 1fr;
             }
@@ -161,11 +162,18 @@
             position: relative;
             background: #000;
             width: 100%;
-            aspect-ratio: 4 / 3;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
+        }
+
+        .teacher-panel .video-box {
+            aspect-ratio: 16 / 9;
+        }
+
+        .student-panel .video-box {
+            aspect-ratio: 4 / 3;
         }
 
         .video-box video, .video-box canvas {
@@ -312,10 +320,10 @@
             </div>
         </div>
 
-        <!-- Dual-Pane Stage -->
+        <!-- Dual-Pane Stage (75% Teacher Broadcast / 25% Student Privacy Mesh) -->
         <div class="stage-grid">
-            <!-- Left Pane: Live Teacher Broadcast Feed -->
-            <div class="panel-card">
+            <!-- Left Pane: Live Teacher Broadcast Feed (75%) -->
+            <div class="panel-card teacher-panel">
                 <div class="panel-header">
                     <span>📡 Teacher Live Broadcast</span>
                     <span id="teacher_stream_tag" style="color: var(--warn-color); font-size: 0.75rem;">Waiting for feed...</span>
@@ -333,10 +341,10 @@
                 </div>
             </div>
 
-            <!-- Right Pane: Student Local Privacy Mesh -->
-            <div class="panel-card">
+            <!-- Right Pane: Student Local Privacy Mesh (25%) -->
+            <div class="panel-card student-panel">
                 <div class="panel-header">
-                    <span>🛡️ Local Privacy Mesh Stream</span>
+                    <span>🛡️ Local Privacy Mesh</span>
                     <span style="color: var(--success-color); font-size: 0.75rem;">Vector Wireframe Only</span>
                 </div>
                 <div class="video-box">
@@ -355,10 +363,7 @@
                 </div>
                 <div class="controls-toolbar">
                     <button id="toggle_student_mic_btn" class="ctrl-btn">
-                        <span id="mic_icon">🎙️</span> Mute My Mic
-                    </button>
-                    <button id="toggle_student_cam_btn" class="ctrl-btn">
-                        <span id="cam_icon">📹</span> Stop My Video
+                        <span id="mic_icon">🎙️</span> Mute Mic
                     </button>
                 </div>
             </div>
@@ -437,9 +442,7 @@
 
         const toggleTeacherAudioBtn = document.getElementById("toggle_teacher_audio_btn");
         const toggleStudentMicBtn = document.getElementById("toggle_student_mic_btn");
-        const toggleStudentCamBtn = document.getElementById("toggle_student_cam_btn");
         const micIcon = document.getElementById("mic_icon");
-        const camIcon = document.getElementById("cam_icon");
 
         // State
         let localUserMedia = null;
@@ -813,25 +816,10 @@
                 audioTrack.enabled = !audioTrack.enabled;
                 if (audioTrack.enabled) {
                     toggleStudentMicBtn.classList.remove("off");
-                    toggleStudentMicBtn.innerHTML = `<span>🎙️</span> Mute My Mic`;
+                    toggleStudentMicBtn.innerHTML = `<span>🎙️</span> Mute Mic`;
                 } else {
                     toggleStudentMicBtn.classList.add("off");
-                    toggleStudentMicBtn.innerHTML = `<span>🔇</span> Mic Muted`;
-                }
-            }
-        });
-
-        toggleStudentCamBtn.addEventListener("click", () => {
-            if (!localUserMedia) return;
-            const videoTrack = localUserMedia.getVideoTracks()[0];
-            if (videoTrack) {
-                videoTrack.enabled = !videoTrack.enabled;
-                if (videoTrack.enabled) {
-                    toggleStudentCamBtn.classList.remove("off");
-                    toggleStudentCamBtn.innerHTML = `<span>📹</span> Stop My Video`;
-                } else {
-                    toggleStudentCamBtn.classList.add("off");
-                    toggleStudentCamBtn.innerHTML = `<span>🚫</span> Video Stopped`;
+                    toggleStudentMicBtn.innerHTML = `<span>🔇</span> Unmute Mic`;
                 }
             }
         });

@@ -128,3 +128,72 @@ def render_teacher_dashboard(live_students: dict, total_joined: list):
         df_roster.columns = ['Student Name', 'Joined At', 'Last Active', 'Last CEI Focus']
         
         st.dataframe(df_roster, use_container_width=True)
+
+def render_session_summary_ledger(ledger: list, room_id: str):
+    """
+    Renders the finalized Session-End Engagement Aggregation and Ledger
+    with Student Name, Total Time Present, Final CEI Score %, Primary Attention State,
+    and a one-click CSV export button.
+    """
+    apply_global_styles()
+
+    st.title("🎓 Session Concluded — Engagement Summary Ledger")
+    st.markdown(f"**Classroom Target:** `{room_id}` | **Session Aggregation Report**")
+    st.info("The lecture session has been closed. Below is the finalized attendance, engagement scores, and primary attention state compiled from local SQLite telemetry.")
+
+    if not ledger:
+        st.warning("No student telemetry records were captured during this classroom session.")
+        return
+
+    # 1. Top Summary Cards
+    total_students = len(ledger)
+    avg_session_cei = sum(s["avg_cei_pct"] for s in ledger) / total_students if total_students > 0 else 0.0
+    attentive_count = sum(1 for s in ledger if "Attentive" in s.get("primary_state", ""))
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("👥 Total Students Attended", total_students)
+    with c2:
+        st.metric("📊 Session Average Focus (CEI)", f"{avg_session_cei:.1f}%")
+    with c3:
+        st.metric("🎯 Primarily Attentive", f"{attentive_count} / {total_students}")
+
+    st.divider()
+
+    # 2. Detailed Summary Table
+    st.markdown("### 📋 Final Student Engagement Ledger")
+    df = pd.DataFrame(ledger)
+    
+    display_df = df[[
+        "student_name",
+        "duration_str",
+        "avg_cei_pct",
+        "primary_state"
+    ]].copy()
+
+    display_df.columns = [
+        "Student Name",
+        "Total Time Present / Attended",
+        "Final Session Average Engagement Score (%)",
+        "Primary Attention State"
+    ]
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.divider()
+
+    # 3. CSV Export Option
+    st.markdown("### 📥 Export Final Session Ledger")
+    csv_bytes = display_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="⬇️ Download Finalized Attendance & Score Ledger (CSV)",
+        data=csv_bytes,
+        file_name=f"EduGuard_{room_id}_Session_Ledger.csv",
+        mime="text/csv",
+        type="primary",
+        use_container_width=True
+    )
