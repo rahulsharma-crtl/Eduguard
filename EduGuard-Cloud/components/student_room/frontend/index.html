@@ -304,6 +304,59 @@
             border-radius: 3px;
             transition: width 0.3s ease, background-color 0.3s ease;
         }
+
+        /* High-Visibility Lecturer Audio Evasion Alert Banner */
+        .audio-evasion-banner {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(185, 28, 28, 0.95));
+            border: 2px solid #ff4d4d;
+            border-radius: var(--radius-md);
+            padding: 14px 20px;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            box-shadow: 0 0 24px rgba(239, 68, 68, 0.6), inset 0 0 12px rgba(255, 255, 255, 0.2);
+            animation: warningGlow 1.5s infinite alternate;
+            z-index: 100;
+        }
+
+        @keyframes warningGlow {
+            0% { box-shadow: 0 0 16px rgba(239, 68, 68, 0.4); transform: scale(1.0); }
+            100% { box-shadow: 0 0 32px rgba(239, 68, 68, 0.85); transform: scale(1.005); }
+        }
+
+        .banner-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        }
+
+        .banner-icon {
+            font-size: 1.5rem;
+        }
+
+        .banner-btn {
+            background: #ffffff;
+            color: #b91c1c;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 8px 18px;
+            font-weight: 700;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .banner-btn:hover {
+            background: #fee2e2;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -318,6 +371,15 @@
                 <span class="pulse-dot"></span>
                 <span id="conn_status_text">Connecting to Teacher WebRTC...</span>
             </div>
+        </div>
+
+        <!-- High-Visibility Lecturer Audio Evasion Alert Banner -->
+        <div id="audio_evasion_banner" class="audio-evasion-banner" style="display: none;">
+            <div class="banner-content">
+                <span class="banner-icon">⚠️</span>
+                <span class="banner-text"><strong>WARNING:</strong> Lecturer Audio is Muted! Unmute immediately. Attention penalties are actively accumulating.</span>
+            </div>
+            <button id="unmute_evasion_btn" class="banner-btn">🔊 Unmute Now</button>
         </div>
 
         <!-- Dual-Pane Stage (75% Teacher Broadcast / 25% Student Privacy Mesh) -->
@@ -443,8 +505,11 @@
         const toggleTeacherAudioBtn = document.getElementById("toggle_teacher_audio_btn");
         const toggleStudentMicBtn = document.getElementById("toggle_student_mic_btn");
         const micIcon = document.getElementById("mic_icon");
+        const audioEvasionBanner = document.getElementById("audio_evasion_banner");
+        const unmuteEvasionBtn = document.getElementById("unmute_evasion_btn");
 
         // State
+        let isLecturerAudioSilenced = false;
         let localUserMedia = null;
         let virtualCanvasStream = null;
         let peer = null;
@@ -652,7 +717,16 @@
             attentiveness = Math.max(0.0, Math.min(1.0, attentiveness));
             distraction = Math.max(0.0, Math.min(1.0, distraction));
             const rawCEI = (0.30 * presence) + (0.45 * attentiveness) - (0.25 * distraction);
-            const ceiScore = Math.max(0.0, Math.min(1.0, rawCEI));
+            let ceiScore = Math.max(0.0, Math.min(1.0, rawCEI));
+
+            // Instantaneous Lecturer Audio Evasion Penalty (50-70% heavy deduction while lecture is silenced)
+            if (isLecturerAudioSilenced) {
+                isAudioEvasion = true;
+                statusStr = "Audio Evasion: Muted";
+                ceiScore = Math.max(0.0, ceiScore * 0.40); // 60% penalty deduction
+                attentiveness = Math.max(0.0, attentiveness - 0.60);
+                distraction = Math.min(1.0, distraction + 0.50);
+            }
 
             // Update UI HUD
             valCEI.innerText = `${(ceiScore * 100).toFixed(1)}%`;
@@ -664,7 +738,10 @@
             barATT.style.width = `${attentiveness * 100}%`;
             barEAR.style.width = `${Math.min(100, (avgEAR / 0.4) * 100)}%`;
 
-            if (isAudioEvasion) {
+            if (isLecturerAudioSilenced) {
+                valStatus.style.color = "var(--danger-color)";
+                kinematicsTag.innerText = "🔇 Alert: Lecturer Audio Silenced";
+            } else if (isAudioEvasion) {
                 valStatus.style.color = "var(--danger-color)";
                 kinematicsTag.innerText = "🚨 Alert: Suspicious Vocal Activity";
             } else if (isDrowsy) {
@@ -695,10 +772,11 @@
                     is_looking_away: isLookingAway,
                     is_speech_detected: isSpeechDetected,
                     is_mic_muted: isMicMuted,
+                    is_lecturer_audio_muted: isLecturerAudioSilenced,
                     audio_energy: parseFloat(audioEnergyLevel.toFixed(3)),
-                    audio_status: audioAlertStatus,
-                    audio_evasion: isAudioEvasion,
-                    status: statusStr
+                    audio_status: isLecturerAudioSilenced ? "Lecturer Audio Muted" : audioAlertStatus,
+                    audio_evasion: isAudioEvasion || isLecturerAudioSilenced,
+                    status: isLecturerAudioSilenced ? "Audio Evasion: Muted" : statusStr
                 };
 
                 // 1. Dispatch to Streamlit for SQLite session database logging
@@ -878,16 +956,63 @@
             });
         }
 
-        // --- 6. Control Handlers ---
-        toggleTeacherAudioBtn.addEventListener("click", () => {
-            teacherFeed.muted = !teacherFeed.muted;
-            if (teacherFeed.muted) {
-                toggleTeacherAudioBtn.classList.add("off");
-                toggleTeacherAudioBtn.innerHTML = `<span>🔇</span> Unmute Lecture`;
+        // --- 6. Lecturer Audio Evasion Detection & Control Handlers ---
+        const teacherVideo = document.getElementById("teacher_feed");
+
+        function handleAudioEvasion(isMuted) {
+            isLecturerAudioSilenced = isMuted;
+            if (isMuted) {
+                if (audioEvasionBanner) audioEvasionBanner.style.display = "flex";
+                if (toggleTeacherAudioBtn) {
+                    toggleTeacherAudioBtn.classList.add("off");
+                    toggleTeacherAudioBtn.innerHTML = `<span>🔇</span> Unmute Lecture Audio`;
+                }
             } else {
-                toggleTeacherAudioBtn.classList.remove("off");
-                toggleTeacherAudioBtn.innerHTML = `<span>🔊</span> Mute Lecture Audio`;
+                if (audioEvasionBanner) audioEvasionBanner.style.display = "none";
+                if (toggleTeacherAudioBtn) {
+                    toggleTeacherAudioBtn.classList.remove("off");
+                    toggleTeacherAudioBtn.innerHTML = `<span>🔊</span> Mute Lecture Audio`;
+                }
             }
+            resizeIframe();
+        }
+
+        // Attach listener to student's teacher_feed video element
+        if (teacherVideo) {
+            teacherVideo.addEventListener('volumechange', () => {
+                const isMuted = teacherVideo.muted || teacherVideo.volume <= 0.05;
+                handleAudioEvasion(isMuted);
+            });
+        }
+
+        // Enforce periodic validation every 2 seconds: check if teacherVideo.muted === true or volume < 0.1
+        setInterval(() => {
+            if (teacherVideo) {
+                const isMuted = teacherVideo.muted === true || teacherVideo.volume < 0.10;
+                if (isMuted !== isLecturerAudioSilenced) {
+                    handleAudioEvasion(isMuted);
+                }
+            }
+        }, 2000);
+
+        if (unmuteEvasionBtn) {
+            unmuteEvasionBtn.addEventListener("click", () => {
+                if (teacherVideo) {
+                    teacherVideo.muted = false;
+                    teacherVideo.volume = 1.0;
+                }
+                handleAudioEvasion(false);
+            });
+        }
+
+        toggleTeacherAudioBtn.addEventListener("click", () => {
+            if (!teacherVideo) return;
+            teacherVideo.muted = !teacherVideo.muted;
+            if (!teacherVideo.muted && teacherVideo.volume < 0.2) {
+                teacherVideo.volume = 1.0;
+            }
+            const isMuted = teacherVideo.muted || teacherVideo.volume <= 0.05;
+            handleAudioEvasion(isMuted);
         });
 
         toggleStudentMicBtn.addEventListener("click", () => {

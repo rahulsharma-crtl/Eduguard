@@ -687,7 +687,7 @@
             const statusText = data.status || "Attentive";
             const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
             const isDistracted = data.isLookingAway || data.is_looking_away || data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("looking") || statusText.toLowerCase().includes("distract");
-            const isAudioEvasion = data.audio_evasion || statusText.toLowerCase().includes("speaking");
+            const isAudioEvasion = data.audio_evasion || data.is_lecturer_audio_muted || statusText.toLowerCase().includes("speaking") || statusText.toLowerCase().includes("evasion") || statusText.toLowerCase().includes("muted");
 
             badge.classList.remove("badge-attentive", "badge-warning", "badge-alert");
 

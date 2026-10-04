@@ -206,15 +206,19 @@ class DatabaseManager:
                     statuses = stats["statuses"]
                     total_statuses = len(statuses)
                     if total_statuses > 0:
+                        evasion_count = sum(1 for s in statuses if ("audio evasion" in s.lower() or "muted" in s.lower()))
                         drowsy_count = sum(1 for s in statuses if "drowsy" in s.lower())
                         distract_count = sum(1 for s in statuses if ("looking" in s.lower() or "distract" in s.lower() or "away" in s.lower()))
                         absent_count = sum(1 for s in statuses if "absent" in s.lower())
 
+                        evasion_pct = evasion_count / total_statuses
                         drowsy_pct = drowsy_count / total_statuses
                         distract_pct = distract_count / total_statuses
                         absent_pct = absent_count / total_statuses
 
-                        if drowsy_pct >= 0.20:
+                        if evasion_pct >= 0.15:
+                            primary_state = "Audio Evasion (Silenced Lecture)"
+                        elif drowsy_pct >= 0.20:
                             primary_state = "High Drowsiness"
                         elif distract_pct >= 0.25:
                             primary_state = "Frequent Distractions"
