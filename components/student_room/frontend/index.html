@@ -783,8 +783,17 @@
                 Streamlit.setComponentValue(telemetryPayload);
 
                 // 2. Direct P2P WebRTC DataChannel to Teacher for instant live floating badge overlay
-                if (telemetryDataChannel && telemetryDataChannel.open) {
-                    telemetryDataChannel.send(telemetryPayload);
+                const isDataChannelReady = telemetryDataChannel && (
+                    telemetryDataChannel.open || 
+                    (telemetryDataChannel.dataChannel && telemetryDataChannel.dataChannel.readyState === "open")
+                );
+
+                if (isDataChannelReady) {
+                    try {
+                        telemetryDataChannel.send(telemetryPayload);
+                    } catch (dcErr) {
+                        console.warn("Failed to dispatch telemetry via DataChannel:", dcErr);
+                    }
                 }
             }
         }
@@ -905,7 +914,11 @@
 
         function connectTelemetryDataChannel(teacherPeerId) {
             if (!peer || peer.destroyed) return;
-            if (telemetryDataChannel && telemetryDataChannel.open) return;
+            const isAlreadyConnected = telemetryDataChannel && (
+                telemetryDataChannel.open || 
+                (telemetryDataChannel.dataChannel && telemetryDataChannel.dataChannel.readyState === "open")
+            );
+            if (isAlreadyConnected) return;
 
             try {
                 console.log(`Opening WebRTC DataChannel to teacher: ${teacherPeerId}`);
