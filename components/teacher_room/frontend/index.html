@@ -607,6 +607,16 @@
             });
         }
 
+        function escapeHtml(str) {
+            if (typeof str !== "string") return String(str || "");
+            return str
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         // Render Student in Horizontal Roster Table (Zero Video Elements, Names & Status Only)
         function renderStudentRoster(peerId, stream, call) {
             removeStudentRoster(peerId);
@@ -630,6 +640,7 @@
 
             let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
             displayName = displayName.replace(/-[0-9]{3,5}$/, "") || "Student";
+            const safeDisplayName = escapeHtml(displayName);
 
             const joinTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -637,7 +648,7 @@
                 <td>
                     <div class="student-name-cell">
                         <div class="roster-avatar">🧑‍🎓</div>
-                        <span>${displayName}</span>
+                        <span>${safeDisplayName}</span>
                     </div>
                 </td>
                 <td>
@@ -707,16 +718,17 @@
             const isAudioEvasion = data.audio_evasion || data.is_lecturer_audio_muted || statusText.toLowerCase().includes("speaking") || statusText.toLowerCase().includes("evasion") || statusText.toLowerCase().includes("muted");
 
             badge.classList.remove("badge-attentive", "badge-warning", "badge-alert");
+            const safeStatus = escapeHtml(statusText);
 
             if (isAudioEvasion || isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
                 badge.classList.add("badge-alert");
-                badge.innerHTML = `<span>🚨 ${ceiPct}% | ${statusText}</span>`;
+                badge.innerHTML = `<span>🚨 ${ceiPct}% | ${safeStatus}</span>`;
             } else if (isDistracted || ceiPct < 70) {
                 badge.classList.add("badge-warning");
-                badge.innerHTML = `<span>⚠️ ${ceiPct}% | ${statusText}</span>`;
+                badge.innerHTML = `<span>⚠️ ${ceiPct}% | ${safeStatus}</span>`;
             } else {
                 badge.classList.add("badge-attentive");
-                badge.innerHTML = `<span>🎯 ${ceiPct}% | ${statusText}</span>`;
+                badge.innerHTML = `<span>🎯 ${ceiPct}% | ${safeStatus}</span>`;
             }
         }
 
