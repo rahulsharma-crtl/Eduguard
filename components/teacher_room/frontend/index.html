@@ -591,7 +591,18 @@
                 conn.on("data", (data) => {
                     if (data && data.type === "telemetry") {
                         updateStudentTelemetryBadge(data.peerId || conn.peer, data);
+                    } else if (data && data.type === "student_left") {
+                        console.log(`Student explicitly left: ${data.peerId || conn.peer}`);
+                        removeStudentRoster(data.peerId || conn.peer);
                     }
+                });
+                conn.on("close", () => {
+                    console.log(`Telemetry DataChannel closed from: ${conn.peer}`);
+                    removeStudentRoster(conn.peer);
+                });
+                conn.on("error", (err) => {
+                    console.warn(`DataChannel error from ${conn.peer}:`, err);
+                    removeStudentRoster(conn.peer);
                 });
             });
         }
@@ -645,7 +656,7 @@
             rosterTbody.appendChild(row);
             const badge = row.querySelector(`#badge-${peerId}`);
 
-            connectedStudents.set(peerId, { call, stream, element: row, badge, studentName: displayName, joinTime });
+            connectedStudents.set(peerId, { call, stream, element: row, badge, studentName: displayName, joinTime, lastSeen: Date.now() });
             updateStudentCount();
             resizeIframe();
         }
@@ -669,18 +680,24 @@
         // Dynamic Badge Telemetry Updater
         function updateStudentTelemetryBadge(peerId, data) {
             let badge = document.getElementById(`badge-${peerId}`);
+            let matchedPeerId = peerId;
             if (!badge) {
                 // Search inside table rows
                 const rows = document.querySelectorAll("#roster_tbody tr");
                 for (const r of rows) {
                     if (r.id.includes(peerId) || (data.studentName && r.innerText.includes(data.studentName))) {
                         badge = r.querySelector(".student-telemetry-badge");
+                        matchedPeerId = r.id.replace("roster_", "");
                         break;
                     }
                 }
             }
 
             if (!badge) return;
+
+            if (connectedStudents.has(matchedPeerId)) {
+                connectedStudents.get(matchedPeerId).lastSeen = Date.now();
+            }
 
             const ceiRaw = (data.cei !== undefined) ? data.cei : (data.cei_score !== undefined ? data.cei_score : 1.0);
             const ceiPct = Math.round(ceiRaw * 100);
@@ -707,6 +724,17 @@
             const count = connectedStudents.size;
             studentsCountBadge.innerText = `${count} Connected`;
         }
+
+        // Heartbeat Watchdog: Prune stale attendees if network drops or laptop closes abruptly
+        setInterval(() => {
+            const now = Date.now();
+            for (const [peerId, student] of connectedStudents.entries()) {
+                if (student.lastSeen && (now - student.lastSeen > 8000)) {
+                    console.log(`Pruning inactive student peer (heartbeat timeout): ${peerId}`);
+                    removeStudentRoster(peerId);
+                }
+            }
+        }, 3000);
 
         // Controls
         toggleMicBtn.addEventListener("click", () => {

@@ -1052,6 +1052,22 @@
             }
         });
 
+        // Clean disconnect signal on tab close or navigation
+        window.addEventListener("beforeunload", () => {
+            if (telemetryDataChannel && (telemetryDataChannel.open || telemetryDataChannel.readyState === "open")) {
+                try {
+                    telemetryDataChannel.send({ type: "student_left", peerId: peer ? peer.id : null });
+                    telemetryDataChannel.close();
+                } catch (_) {}
+            }
+            if (activeCall) {
+                try { activeCall.close(); } catch (_) {}
+            }
+            if (peer) {
+                try { peer.destroy(); } catch (_) {}
+            }
+        });
+
         // Initialize Local Hardware & Handshake
         initLocalStream().then(() => {
             Streamlit.setComponentReady();
