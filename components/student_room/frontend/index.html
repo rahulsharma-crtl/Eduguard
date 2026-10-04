@@ -452,10 +452,18 @@
         let currentRoomId = null;
         let currentStudentName = "Student";
 
-        // Kinematics Counters
+        // Kinematics & Audio Counters
         let consecutiveClosedFrames = 0;
         let frameCount = 0;
         let lastDispatchTime = 0;
+
+        // Client-Side Acoustic Evasion State (Web Audio API)
+        let audioContext = null;
+        let audioAnalyser = null;
+        let audioDataArray = null;
+        let speakingFrames = 0;
+        let audioEnergyLevel = 0.0;
+        let audioAlertStatus = "Quiet / Clean";
 
         function setConnectionStatus(type, msg) {
             connStatusBadge.className = `connection-status status-${type}`;
@@ -592,6 +600,54 @@
 
             ctx.restore();
 
+            // --- Client-Side Audio Evasion Detection (Web Audio API) ---
+            let isSpeechDetected = false;
+            let audioRMS = 0.0;
+            const audioTrack = (localUserMedia && localUserMedia.getAudioTracks().length > 0) ? localUserMedia.getAudioTracks()[0] : null;
+            const isMicMuted = !audioTrack || !audioTrack.enabled;
+
+            if (audioAnalyser && audioDataArray && !isMicMuted) {
+                audioAnalyser.getByteFrequencyData(audioDataArray);
+                let sumSq = 0;
+                for (let i = 0; i < audioDataArray.length; i++) {
+                    sumSq += audioDataArray[i] * audioDataArray[i];
+                }
+                audioRMS = Math.sqrt(sumSq / audioDataArray.length) / 255.0;
+                audioEnergyLevel = audioRMS;
+
+                // Speech detection threshold (typical speech frequency energy > 0.08)
+                if (audioRMS > 0.08) {
+                    speakingFrames++;
+                    if (speakingFrames >= 6) { // ~200ms sustained speech
+                        isSpeechDetected = true;
+                    }
+                } else {
+                    speakingFrames = Math.max(0, speakingFrames - 1);
+                }
+            } else {
+                audioEnergyLevel = 0.0;
+                speakingFrames = 0;
+            }
+
+            // Audio Evasion & Anomalies
+            let isAudioEvasion = false;
+            if (isMicMuted) {
+                audioAlertStatus = "Mic Muted";
+            } else if (isSpeechDetected && (isLookingAway || isLookingDown)) {
+                // Suspicious: Vocal speech while gaze diverted from screen
+                isAudioEvasion = true;
+                audioAlertStatus = "Side-Channel Speech";
+                attentiveness = Math.max(0.0, attentiveness - 0.25);
+                distraction = Math.min(1.0, distraction + 0.30);
+                if (!isDrowsy) {
+                    statusStr = "Speaking (Gaze Diverted)";
+                }
+            } else if (isSpeechDetected) {
+                audioAlertStatus = "Speaking / Active Audio";
+            } else {
+                audioAlertStatus = "Clean / Quiet";
+            }
+
             // CEI Formula: E = (0.30 * P) + (0.45 * A) - (0.25 * D)
             attentiveness = Math.max(0.0, Math.min(1.0, attentiveness));
             distraction = Math.max(0.0, Math.min(1.0, distraction));
@@ -608,7 +664,10 @@
             barATT.style.width = `${attentiveness * 100}%`;
             barEAR.style.width = `${Math.min(100, (avgEAR / 0.4) * 100)}%`;
 
-            if (isDrowsy) {
+            if (isAudioEvasion) {
+                valStatus.style.color = "var(--danger-color)";
+                kinematicsTag.innerText = "🚨 Alert: Suspicious Vocal Activity";
+            } else if (isDrowsy) {
                 valStatus.style.color = "var(--danger-color)";
                 kinematicsTag.innerText = "⚠️ Alert: Prolonged Eye Closure";
             } else if (isLookingAway || isLookingDown) {
@@ -634,6 +693,11 @@
                     ear: avgEAR,
                     is_drowsy: isDrowsy,
                     is_looking_away: isLookingAway,
+                    is_speech_detected: isSpeechDetected,
+                    is_mic_muted: isMicMuted,
+                    audio_energy: parseFloat(audioEnergyLevel.toFixed(3)),
+                    audio_status: audioAlertStatus,
+                    audio_evasion: isAudioEvasion,
                     status: statusStr
                 };
 
@@ -664,6 +728,23 @@
                 const audioTracks = localUserMedia.getAudioTracks();
                 if (audioTracks.length > 0) {
                     virtualCanvasStream.addTrack(audioTracks[0]);
+                }
+
+                // Initialize Client-Side Audio Analyser (Privacy-preserving local speech & evasion detection)
+                try {
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContextClass && audioTracks.length > 0) {
+                        audioContext = new AudioContextClass();
+                        audioAnalyser = audioContext.createAnalyser();
+                        audioAnalyser.fftSize = 256;
+                        audioAnalyser.smoothingTimeConstant = 0.3;
+                        const audioSource = audioContext.createMediaStreamSource(localUserMedia);
+                        audioSource.connect(audioAnalyser);
+                        audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+                        console.log("Client-side acoustic evasion analyser initialized successfully.");
+                    }
+                } catch (audioErr) {
+                    console.warn("Client audio analyser initialization notice:", audioErr);
                 }
 
                 // Initialize MediaPipe FaceMesh

@@ -113,21 +113,15 @@
             100% { transform: scale(0.95); opacity: 0.8; }
         }
 
-        /* Stage Layout */
-        .video-stage {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            align-items: start;
+        /* Stacked Vertical Layout: Top Teacher Feed, Bottom Horizontal Participant Roster */
+        .console-stage {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 100%;
         }
 
-        @media (max-width: 900px) {
-            .video-stage {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Teacher Local Card */
+        /* Teacher Local Broadcast Pod (Top Container) */
         .teacher-pod {
             background: var(--surface-color);
             border: 1px solid var(--border-color);
@@ -137,10 +131,13 @@
             flex-direction: column;
             position: relative;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            width: 100%;
+            max-width: 920px;
+            margin: 0 auto;
         }
 
         .pod-title {
-            padding: 10px 14px;
+            padding: 10px 16px;
             font-size: 0.85rem;
             font-weight: 700;
             color: var(--text-dim);
@@ -172,13 +169,13 @@
 
         .video-overlay-tag {
             position: absolute;
-            bottom: 10px;
-            left: 10px;
+            bottom: 12px;
+            left: 12px;
             background: rgba(14, 17, 23, 0.85);
             border: 1px solid rgba(255, 255, 255, 0.15);
-            padding: 4px 10px;
+            padding: 5px 12px;
             border-radius: 6px;
-            font-size: 0.8rem;
+            font-size: 0.82rem;
             color: #fff;
             display: flex;
             align-items: center;
@@ -189,8 +186,8 @@
         /* Controls */
         .controls-toolbar {
             display: flex;
-            gap: 8px;
-            padding: 10px 14px;
+            gap: 10px;
+            padding: 12px 16px;
             background: rgba(0, 0, 0, 0.25);
             border-top: 1px solid rgba(255, 255, 255, 0.05);
             justify-content: center;
@@ -200,14 +197,14 @@
             background: var(--surface-hover);
             border: 1px solid rgba(255, 255, 255, 0.15);
             color: var(--text-main);
-            padding: 7px 14px;
+            padding: 8px 18px;
             border-radius: var(--radius-sm);
             cursor: pointer;
             font-size: 0.85rem;
             font-weight: 600;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             transition: all 0.2s ease;
         }
 
@@ -222,16 +219,17 @@
             color: #f87171;
         }
 
-        /* Participant Roster Section (Zero Inbound Video - Low Overhead & Privacy-First) */
+        /* Participant Roster Section (Bottom Wide Container) */
         .roster-section {
             background: var(--surface-color);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-md);
-            padding: 14px;
+            padding: 16px 20px;
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            min-height: 280px;
+            gap: 14px;
+            width: 100%;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
         }
 
         .roster-header {
@@ -239,96 +237,97 @@
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            padding-bottom: 10px;
+            padding-bottom: 12px;
         }
 
         .roster-header h3 {
-            font-size: 0.95rem;
+            font-size: 1rem;
             color: var(--text-main);
-            font-weight: 600;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .roster-count {
             font-size: 0.8rem;
-            color: var(--text-dim);
-            background: rgba(255, 255, 255, 0.05);
-            padding: 3px 8px;
-            border-radius: 12px;
+            color: #8da4ff;
+            background: rgba(78, 107, 255, 0.15);
+            border: 1px solid var(--primary-accent);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
         }
 
-        .roster-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            max-height: 380px;
-            overflow-y: auto;
+        /* Wide Horizontal Roster Table */
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
         }
 
-        .empty-roster-msg {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 36px 10px;
-            color: var(--text-dim);
-            font-size: 0.9rem;
-            border: 2px dashed rgba(255, 255, 255, 0.08);
-            border-radius: var(--radius-md);
+        .roster-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
         }
 
-        .roster-card {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: rgba(22, 27, 34, 0.85);
-            border: 1px solid rgba(78, 107, 255, 0.2);
-            border-radius: var(--radius-sm);
+        .roster-table th {
             padding: 10px 14px;
-            transition: all 0.2s ease;
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
 
-        .roster-card:hover {
-            border-color: var(--primary-accent);
-            background: rgba(78, 107, 255, 0.06);
+        .roster-table tbody tr {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            transition: background 0.2s ease;
         }
 
-        .roster-student-info {
+        .roster-table tbody tr:hover {
+            background: rgba(78, 107, 255, 0.05);
+        }
+
+        .roster-table td {
+            padding: 12px 14px;
+            font-size: 0.88rem;
+            vertical-align: middle;
+        }
+
+        .student-name-cell {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
+            font-weight: 600;
+            color: #fff;
         }
 
         .roster-avatar {
-            width: 38px;
-            height: 38px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             background: rgba(78, 107, 255, 0.15);
             border: 1px solid var(--primary-accent);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.1rem;
+            font-size: 0.95rem;
+            flex-shrink: 0;
         }
 
-        .roster-meta {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .roster-name {
-            font-size: 0.92rem;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .roster-conn {
-            display: flex;
+        .status-cell-connected {
+            display: inline-flex;
             align-items: center;
             gap: 6px;
-            font-size: 0.75rem;
             color: var(--success-color);
+            font-weight: 600;
+            font-size: 0.82rem;
+            background: rgba(34, 197, 94, 0.12);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            padding: 3px 10px;
+            border-radius: 12px;
         }
 
         .roster-dot {
@@ -339,11 +338,24 @@
             display: inline-block;
         }
 
+        .time-joined-cell {
+            color: var(--text-dim);
+            font-family: monospace;
+            font-size: 0.84rem;
+        }
+
+        .empty-roster-msg {
+            text-align: center;
+            padding: 32px 16px;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
         /* Real-Time Floating CEI Telemetry Badge */
         .student-telemetry-badge {
-            padding: 4px 10px;
+            padding: 4px 12px;
             border-radius: 16px;
-            font-size: 0.76rem;
+            font-size: 0.78rem;
             font-weight: 700;
             display: inline-flex;
             align-items: center;
@@ -389,13 +401,13 @@
             </div>
         </div>
 
-        <!-- Video Stage -->
-        <div class="video-stage">
-            <!-- Left: Teacher Broadcast Pod -->
+        <!-- Stacked Vertical Console Stage -->
+        <div class="console-stage">
+            <!-- Top Container: Teacher Broadcast Feed -->
             <div class="teacher-pod">
                 <div class="pod-title">
                     <span>📡 Teacher Live Feed</span>
-                    <span style="color: var(--success-color); font-size: 0.75rem;">1080p HD</span>
+                    <span style="color: var(--success-color); font-size: 0.75rem;">1080p HD Broadcast</span>
                 </div>
                 <div class="video-wrapper">
                     <!-- Local video is muted to prevent self-echo -->
@@ -415,18 +427,32 @@
                 </div>
             </div>
 
-            <!-- Right: Student Participant Roster (Zero Video Decoding Overhead) -->
+            <!-- Bottom Container: Live Participant Roster (Directly Below Teacher Feed) -->
             <div class="roster-section">
                 <div class="roster-header">
                     <h3>👥 Live Participant Roster</h3>
                     <span id="students_count_badge" class="roster-count">0 Connected</span>
                 </div>
-                <div id="roster_container" class="roster-list">
-                    <div class="empty-roster-msg" id="empty_roster_msg">
-                        <span style="font-size: 1.6rem;">🎓</span>
-                        <span>Waiting for students to join room...</span>
-                        <span style="font-size: 0.75rem; color: #586069;">Connected students & real-time attention badges appear here.</span>
-                    </div>
+                <div class="table-responsive">
+                    <table class="roster-table">
+                        <thead>
+                            <tr>
+                                <th>Student Name</th>
+                                <th>Connection Status</th>
+                                <th>Time Joined</th>
+                                <th>Live Focus / Telemetry</th>
+                            </tr>
+                        </thead>
+                        <tbody id="roster_tbody">
+                            <tr id="empty_roster_row">
+                                <td colspan="4" class="empty-roster-msg">
+                                    <div style="font-size: 1.5rem; margin-bottom: 6px;">🎓</div>
+                                    <div>Waiting for students to join classroom...</div>
+                                    <div style="font-size: 0.75rem; color: #586069; margin-top: 4px;">Connected student names and live attention statuses will appear in this table.</div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -446,7 +472,7 @@
 
         function resizeIframe() {
             const h = document.getElementById("main_container").offsetHeight + 24;
-            Streamlit.setFrameHeight(Math.max(h, 460));
+            Streamlit.setFrameHeight(Math.max(h, 580));
         }
 
         new ResizeObserver(resizeIframe).observe(document.getElementById("main_container"));
@@ -462,8 +488,8 @@
         const statusText = document.getElementById("status_text");
         const roomBadge = document.getElementById("room_badge");
         const peerIdLabel = document.getElementById("peer_id_label");
-        const rosterContainer = document.getElementById("roster_container");
-        const emptyRosterMsg = document.getElementById("empty_roster_msg");
+        const rosterTbody = document.getElementById("roster_tbody");
+        const emptyRosterRow = document.getElementById("empty_roster_row");
         const studentsCountBadge = document.getElementById("students_count_badge");
 
         const toggleMicBtn = document.getElementById("toggle_mic_btn");
@@ -570,17 +596,16 @@
             });
         }
 
-        // Render Student in Participant Roster (Zero Video Elements, Low CPU/Bandwidth)
+        // Render Student in Horizontal Roster Table (Zero Video Elements, Names & Status Only)
         function renderStudentRoster(peerId, stream, call) {
             removeStudentRoster(peerId);
 
-            if (emptyRosterMsg) {
-                emptyRosterMsg.style.display = "none";
+            if (emptyRosterRow) {
+                emptyRosterRow.style.display = "none";
             }
 
-            const card = document.createElement("div");
-            card.className = "roster-card";
-            card.id = `roster_${peerId}`;
+            const row = document.createElement("tr");
+            row.id = `roster_${peerId}`;
 
             // Optional hidden audio element so teacher can hear unmuted student audio
             if (stream && stream.getAudioTracks && stream.getAudioTracks().length > 0) {
@@ -589,33 +614,38 @@
                 audioElem.playsInline = true;
                 audioElem.srcObject = stream;
                 audioElem.style.display = "none";
-                card.appendChild(audioElem);
+                row.appendChild(audioElem);
             }
 
             let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
-            displayName = displayName.replace(/-[0-9]{3,5}$/, "");
+            displayName = displayName.replace(/-[0-9]{3,5}$/, "") || "Student";
 
-            const infoDiv = document.createElement("div");
-            infoDiv.className = "roster-student-info";
-            infoDiv.innerHTML = `
-                <div class="roster-avatar">🧑‍🎓</div>
-                <div class="roster-meta">
-                    <span class="roster-name">${displayName || "Student"}</span>
-                    <span class="roster-conn"><span class="roster-dot"></span> Online</span>
-                </div>
+            const joinTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            row.innerHTML = `
+                <td>
+                    <div class="student-name-cell">
+                        <div class="roster-avatar">🧑‍🎓</div>
+                        <span>${displayName}</span>
+                    </div>
+                </td>
+                <td>
+                    <span class="status-cell-connected">
+                        <span class="roster-dot"></span> Connected
+                    </span>
+                </td>
+                <td class="time-joined-cell">${joinTime}</td>
+                <td>
+                    <div class="student-telemetry-badge badge-attentive" id="badge-${peerId}">
+                        <span>🎯 100% | Attentive</span>
+                    </div>
+                </td>
             `;
 
-            // Real-Time Attention Badge
-            const badge = document.createElement("div");
-            badge.className = "student-telemetry-badge badge-attentive";
-            badge.id = `badge-${peerId}`;
-            badge.innerHTML = `<span>🎯 100% | Attentive</span>`;
+            rosterTbody.appendChild(row);
+            const badge = row.querySelector(`#badge-${peerId}`);
 
-            card.appendChild(infoDiv);
-            card.appendChild(badge);
-            rosterContainer.appendChild(card);
-
-            connectedStudents.set(peerId, { call, stream, element: card, badge, studentName: displayName });
+            connectedStudents.set(peerId, { call, stream, element: row, badge, studentName: displayName, joinTime });
             updateStudentCount();
             resizeIframe();
         }
@@ -631,8 +661,8 @@
                 resizeIframe();
             }
 
-            if (connectedStudents.size === 0 && emptyRosterMsg) {
-                emptyRosterMsg.style.display = "flex";
+            if (connectedStudents.size === 0 && emptyRosterRow) {
+                emptyRosterRow.style.display = "";
             }
         }
 
@@ -640,11 +670,11 @@
         function updateStudentTelemetryBadge(peerId, data) {
             let badge = document.getElementById(`badge-${peerId}`);
             if (!badge) {
-                // Search inside roster cards
-                const cards = document.querySelectorAll(".roster-card");
-                for (const c of cards) {
-                    if (c.id.includes(peerId) || (data.studentName && c.id.includes(data.studentName))) {
-                        badge = c.querySelector(".student-telemetry-badge");
+                // Search inside table rows
+                const rows = document.querySelectorAll("#roster_tbody tr");
+                for (const r of rows) {
+                    if (r.id.includes(peerId) || (data.studentName && r.innerText.includes(data.studentName))) {
+                        badge = r.querySelector(".student-telemetry-badge");
                         break;
                     }
                 }
@@ -657,10 +687,11 @@
             const statusText = data.status || "Attentive";
             const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
             const isDistracted = data.isLookingAway || data.is_looking_away || data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("looking") || statusText.toLowerCase().includes("distract");
+            const isAudioEvasion = data.audio_evasion || statusText.toLowerCase().includes("speaking");
 
             badge.classList.remove("badge-attentive", "badge-warning", "badge-alert");
 
-            if (isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
+            if (isAudioEvasion || isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
                 badge.classList.add("badge-alert");
                 badge.innerHTML = `<span>🚨 ${ceiPct}% | ${statusText}</span>`;
             } else if (isDistracted || ceiPct < 70) {

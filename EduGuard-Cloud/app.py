@@ -191,11 +191,45 @@ if st.session_state.role == "Teacher":
             st.session_state.session_ended = True
             st.rerun()
 
-        # Shareable Student Link
+        # Shareable Student Link (One-Click Copy)
         full_student_url = f"http://localhost:8501/?room={st.session_state.room_id}"
         st.markdown("### 📋 Student Shareable Link")
-        st.text_input("Copy this FULL link and send it to your students:", value=full_student_url, key="share_link_box")
-        st.caption("Students opening this link will bypass login and directly enter the Privacy Mesh session.")
+        st.caption("Share this URL with students. Clicking the copy button or code block copies the direct room access link.")
+        
+        col_link, col_copy = st.columns([0.82, 0.18])
+        with col_link:
+            st.code(full_student_url, language=None)
+        with col_copy:
+            copy_button_html = f"""
+            <div style="display: flex; align-items: center; height: 100%;">
+                <button id="copyBtn" onclick="
+                    navigator.clipboard.writeText('{full_student_url}');
+                    this.innerHTML = '✅ Copied!';
+                    this.style.background = '#22C55E';
+                    setTimeout(() => {{
+                        this.innerHTML = '📋 Copy Link';
+                        this.style.background = '#4E6BFF';
+                    }}, 2200);
+                " style="
+                    width: 100%;
+                    padding: 9px 12px;
+                    background-color: #4E6BFF;
+                    color: #FFFFFF;
+                    font-size: 0.88rem;
+                    font-weight: 600;
+                    border: none;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                    transition: all 0.2s ease;
+                    box-shadow: 0 4px 12px rgba(78, 107, 255, 0.3);
+                ">📋 Copy Link</button>
+            </div>
+            """
+            st.components.v1.html(copy_button_html, height=52)
         
         st.divider()
         
