@@ -616,11 +616,14 @@
                 kinematicsTag.innerText = "🧑‍🎓 Privacy Mesh Active (Attentive)";
             }
 
-            // Dispatch to Streamlit once every ~500ms (15 frames)
+            // Dispatch to Streamlit & Teacher once every ~500ms (15 frames)
             const now = Date.now();
             if (now - lastDispatchTime > 500) {
                 lastDispatchTime = now;
-                Streamlit.setComponentValue({
+                const telemetryPayload = {
+                    type: "telemetry",
+                    peerId: peer ? peer.id : null,
+                    studentName: currentStudentName,
                     cei_score: ceiScore,
                     attentiveness: attentiveness,
                     distraction: distraction,
@@ -629,7 +632,15 @@
                     is_drowsy: isDrowsy,
                     is_looking_away: isLookingAway,
                     status: statusStr
-                });
+                };
+
+                // 1. Dispatch to Streamlit for SQLite session database logging
+                Streamlit.setComponentValue(telemetryPayload);
+
+                // 2. Direct P2P WebRTC DataChannel to Teacher for instant live floating badge overlay
+                if (telemetryDataChannel && telemetryDataChannel.open) {
+                    telemetryDataChannel.send(telemetryPayload);
+                }
             }
         }
 
@@ -710,6 +721,7 @@
             peer.on("open", (id) => {
                 console.log(`Student peer registered with ID: ${id}`);
                 callTeacher(teacherPeerId);
+                connectTelemetryDataChannel(teacherPeerId);
             });
 
             peer.on("error", (err) => {
@@ -717,11 +729,42 @@
                 if (err.type === "peer-unavailable") {
                     setConnectionStatus("connecting", "Waiting for Teacher to Start Broadcast...");
                     // Retry calling teacher after 3 seconds
-                    setTimeout(() => callTeacher(teacherPeerId), 3000);
+                    setTimeout(() => {
+                        callTeacher(teacherPeerId);
+                        connectTelemetryDataChannel(teacherPeerId);
+                    }, 3000);
                 } else {
                     setConnectionStatus("alert", `WebRTC: ${err.type || "Error"}`);
                 }
             });
+        }
+
+        let telemetryDataChannel = null;
+
+        function connectTelemetryDataChannel(teacherPeerId) {
+            if (!peer || peer.destroyed) return;
+            if (telemetryDataChannel && telemetryDataChannel.open) return;
+
+            try {
+                console.log(`Opening WebRTC DataChannel to teacher: ${teacherPeerId}`);
+                telemetryDataChannel = peer.connect(teacherPeerId, { reliable: true });
+
+                telemetryDataChannel.on("open", () => {
+                    console.log("Telemetry DataChannel connection active with teacher!");
+                });
+
+                telemetryDataChannel.on("close", () => {
+                    console.log("Telemetry DataChannel closed, retrying in 3s...");
+                    setTimeout(() => connectTelemetryDataChannel(teacherPeerId), 3000);
+                });
+
+                telemetryDataChannel.on("error", (err) => {
+                    console.warn("Telemetry DataChannel warning:", err);
+                    setTimeout(() => connectTelemetryDataChannel(teacherPeerId), 3000);
+                });
+            } catch (err) {
+                console.warn("Failed to create DataChannel:", err);
+            }
         }
 
         function callTeacher(teacherPeerId) {

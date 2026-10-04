@@ -176,9 +176,10 @@ if st.session_state.role == "Teacher":
     
     st.divider()
     
-    # Live Classroom Video Broadcast (WebRTC Peer Room)
+    # Live Classroom Video Broadcast (WebRTC Peer Room with Live Telemetry Badges)
     st.markdown("### 🎥 Live Classroom Broadcast & Video Room")
-    teacher_room(st.session_state.room_id, key="teacher_broadcast_component")
+    live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
+    teacher_room(st.session_state.room_id, live_students=live_students, key="teacher_broadcast_component")
     
     st.divider()
     
@@ -280,7 +281,8 @@ elif st.session_state.role == "Student":
             "status": msg
         })
 
-        if len(st.session_state.telemetry_buffer) >= 30:
+        # Batch insert into SQLite every 10 records (~5s) for instant CSV export readiness
+        if len(st.session_state.telemetry_buffer) >= 10:
             db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
             st.session_state.telemetry_buffer.clear()
 

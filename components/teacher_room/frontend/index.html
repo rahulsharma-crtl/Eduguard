@@ -314,6 +314,46 @@
             overflow: hidden;
             text-overflow: ellipsis;
             backdrop-filter: blur(4px);
+            z-index: 5;
+        }
+
+        /* Real-Time Floating CEI Telemetry Badge */
+        .student-telemetry-badge {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            backdrop-filter: blur(6px);
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+
+        .badge-attentive {
+            background: rgba(34, 197, 94, 0.25);
+            border: 1px solid var(--success-color);
+            color: #4ade80;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
+        }
+
+        .badge-warning {
+            background: rgba(250, 204, 21, 0.25);
+            border: 1px solid var(--warn-color);
+            color: #facc15;
+            box-shadow: 0 0 10px rgba(250, 204, 21, 0.3);
+        }
+
+        .badge-alert {
+            background: rgba(239, 68, 68, 0.3);
+            border: 1px solid var(--danger-color);
+            color: #f87171;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+            animation: pulse 1.5s infinite;
         }
     </style>
 </head>
@@ -367,7 +407,7 @@
                     <div class="empty-grid-msg" id="empty_grid_msg">
                         <span style="font-size: 1.6rem;">🎓</span>
                         <span>Waiting for students to join room...</span>
-                        <span style="font-size: 0.75rem; color: #586069;">Incoming WebRTC streams will populate here dynamically.</span>
+                        <span style="font-size: 0.75rem; color: #586069;">Incoming WebRTC streams & telemetry badges will populate here dynamically.</span>
                     </div>
                 </div>
             </div>
@@ -397,7 +437,7 @@
         let localStream = null;
         let peer = null;
         let currentRoomId = null;
-        let connectedStudents = new Map(); // peerId -> { call, stream, element }
+        let connectedStudents = new Map(); // peerId -> { call, stream, element, badge }
 
         const teacherVideo = document.getElementById("teacher_video");
         const statusBadge = document.getElementById("status_badge");
@@ -466,7 +506,6 @@
             peer.on("error", (err) => {
                 console.error("PeerJS error:", err);
                 if (err.type === "unavailable-id") {
-                    // If ID is occupied (e.g. from rapid page refresh), inform teacher
                     setStatus("connecting", "Reconnecting Peer ID...");
                     setTimeout(() => initPeerRoom(roomId), 2000);
                 } else {
@@ -482,7 +521,6 @@
                 if (localStream) {
                     call.answer(localStream);
                 } else {
-                    // Fallback to empty stream if camera wasn't authorized yet
                     call.answer();
                 }
 
@@ -502,11 +540,20 @@
                     removeStudentTile(call.peer);
                 });
             });
+
+            // 4. Listen for Incoming WebRTC DataChannels (Real-Time P2P Student Telemetry)
+            peer.on("connection", (conn) => {
+                console.log(`Incoming telemetry DataChannel from: ${conn.peer}`);
+                conn.on("data", (data) => {
+                    if (data && data.type === "telemetry") {
+                        updateStudentTelemetryBadge(data.peerId || conn.peer, data);
+                    }
+                });
+            });
         }
 
-        // Render Student Video in Dynamic Expanding Grid
+        // Render Student Video in Dynamic Expanding Grid with Floating Telemetry Badge
         function renderStudentTile(peerId, stream, call) {
-            // Remove existing tile if already present
             removeStudentTile(peerId);
 
             if (emptyGridMsg) {
@@ -524,15 +571,21 @@
 
             const tag = document.createElement("div");
             tag.className = "student-tile-tag";
-            // Clean display name from peerId format `${cleanRoom}-student-${name}`
             let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
             tag.innerText = `🧑‍🎓 ${displayName || peerId}`;
 
+            // Floating Real-Time CEI & Engagement Status Badge
+            const badge = document.createElement("div");
+            badge.className = "student-telemetry-badge badge-attentive";
+            badge.id = `badge-${peerId}`;
+            badge.innerHTML = `<span>🎯 100% | Attentive</span>`;
+
             tile.appendChild(vid);
             tile.appendChild(tag);
+            tile.appendChild(badge);
             studentsGrid.appendChild(tile);
 
-            connectedStudents.set(peerId, { call, stream, element: tile });
+            connectedStudents.set(peerId, { call, stream, element: tile, badge });
             updateStudentCount();
             resizeIframe();
         }
@@ -553,12 +606,48 @@
             }
         }
 
+        // Dynamic Badge Telemetry Updater
+        function updateStudentTelemetryBadge(peerId, data) {
+            let badge = document.getElementById(`badge-${peerId}`);
+            if (!badge) {
+                // Fuzzy match tile by student name if peer ID is slightly modified
+                const tiles = document.querySelectorAll(".student-tile");
+                for (const t of tiles) {
+                    if (t.id.includes(peerId) || (data.studentName && t.id.includes(data.studentName))) {
+                        badge = t.querySelector(".student-telemetry-badge");
+                        break;
+                    }
+                }
+            }
+
+            if (!badge) return;
+
+            const ceiRaw = (data.cei !== undefined) ? data.cei : (data.cei_score !== undefined ? data.cei_score : 1.0);
+            const ceiPct = Math.round(ceiRaw * 100);
+            const statusText = data.status || "Attentive";
+            const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
+            const isDistracted = data.isLookingAway || data.is_looking_away || data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("looking") || statusText.toLowerCase().includes("distract");
+
+            badge.classList.remove("badge-attentive", "badge-warning", "badge-alert");
+
+            if (isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
+                badge.classList.add("badge-alert");
+                badge.innerHTML = `<span>🚨 ${ceiPct}% | ${statusText}</span>`;
+            } else if (isDistracted || ceiPct < 70) {
+                badge.classList.add("badge-warning");
+                badge.innerHTML = `<span>⚠️ ${ceiPct}% | ${statusText}</span>`;
+            } else {
+                badge.classList.add("badge-attentive");
+                badge.innerHTML = `<span>🎯 ${ceiPct}% | ${statusText}</span>`;
+            }
+        }
+
         function updateStudentCount() {
             const count = connectedStudents.size;
             studentsCountBadge.innerText = `${count} Connected`;
         }
 
-        // 4. Local Controls
+        // Controls
         toggleMicBtn.addEventListener("click", () => {
             if (!localStream) return;
             const audioTrack = localStream.getAudioTracks()[0];
@@ -596,6 +685,16 @@
                 if (args && args.roomId && args.roomId !== currentRoomId) {
                     currentRoomId = args.roomId;
                     initPeerRoom(currentRoomId);
+                }
+                // Optional fallback: Sync telemetry badges from Streamlit liveStudents argument
+                if (args && args.liveStudents && typeof args.liveStudents === "object") {
+                    for (const [sName, sData] of Object.entries(args.liveStudents)) {
+                        updateStudentTelemetryBadge(sName, {
+                            studentName: sName,
+                            cei: sData.cei_score,
+                            status: sData.status
+                        });
+                    }
                 }
                 resizeIframe();
             }
