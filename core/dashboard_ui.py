@@ -40,38 +40,6 @@ def apply_global_styles():
     </style>
     """, unsafe_allow_html=True)
 
-def draw_student_card(name: str, data: dict):
-    """Renders a single student's live card."""
-    score = data.get("cei_score", 0.0)
-    score_pct = int(score * 100) if score <= 1.0 else int(score)
-    
-    raw_status = data.get("status", "Unknown")
-    status_class = "Attentive"
-    if "Drowsy" in raw_status: status_class = "Drowsy"
-    elif "Distracted" in raw_status or "Away" in raw_status or "Absent" in raw_status: status_class = "Distracted"
-    
-    safe_name = html.escape(name)
-    safe_status = html.escape(raw_status)
-    
-    html_content = f"""
-    <div class="student-card">
-        <div class="student-header">
-            <div class="student-name">🧑‍🎓 {safe_name}</div>
-            <div class="status-badge status-{status_class}">{safe_status}</div>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-            <div>
-                <span style="font-size: 2rem; font-weight: 800; color: #ffffff;">{score_pct}%</span>
-                <span style="color:#8b949e; font-size: 0.85rem;">CEI Focus</span>
-            </div>
-            <div style="font-size: 0.8rem; color: #56d364; font-weight: 600;">
-                🟢 Online Now
-            </div>
-        </div>
-    </div>
-    """
-    st.markdown(html_content, unsafe_allow_html=True)
-
 def render_teacher_dashboard(live_students: dict, total_joined: list):
     """Renders teacher analytics console with real-time student counts."""
     apply_global_styles()
@@ -100,34 +68,6 @@ def render_teacher_dashboard(live_students: dict, total_joined: list):
         st.metric("👥 Total Students Joined Class", num_total)
     with col3:
         st.metric("📊 Live Class Focus Average", f"{avg_score:.1f}%")
-        
-    st.divider()
-    
-    # 2. Live Student Cards (Currently Online)
-    st.markdown("### 🟢 Live Active Students")
-    if not live_students:
-        st.info("No students are currently active in the live stream right now.")
-    else:
-        cols = st.columns(3)
-        for idx, (name, data) in enumerate(live_students.items()):
-            with cols[idx % 3]:
-                draw_student_card(name, data)
-                
-    st.divider()
-    
-    # 3. Class Attendance Roster Table
-    st.markdown("### 📋 Student Class Attendance Roster")
-    if not total_joined:
-        st.info("No students have joined this classroom session yet.")
-    else:
-        df_roster = pd.DataFrame(total_joined)
-        df_roster['Joined At'] = pd.to_datetime(df_roster['joined_at'], unit='s').dt.strftime('%H:%M:%S')
-        df_roster['Last Active'] = pd.to_datetime(df_roster['last_seen'], unit='s').dt.strftime('%H:%M:%S')
-        df_roster['Last CEI Score'] = (df_roster['last_score'] * 100).round(1).astype(str) + '%'
-        df_roster = df_roster[['student_name', 'Joined At', 'Last Active', 'Last CEI Score']]
-        df_roster.columns = ['Student Name', 'Joined At', 'Last Active', 'Last CEI Focus']
-        
-        st.dataframe(df_roster, use_container_width=True)
 
 def render_session_summary_ledger(ledger: list, room_id: str):
     """

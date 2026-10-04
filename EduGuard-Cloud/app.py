@@ -1,38 +1,14 @@
 import sys
 import os
-import ctypes
-
-# CRITICAL WINDOWS DLL PRELOAD FOR TORCH/YOLO
-# On Windows, PyTorch native C++ DLLs (c10.dll, libiomp5md.dll) MUST be preloaded 
-# and imported BEFORE MediaPipe or OpenCV load conflicting runtimes.
-if sys.platform == "win32":
-    torch_lib = os.path.join(sys.prefix, "Lib", "site-packages", "torch", "lib")
-    if os.path.exists(torch_lib):
-        if hasattr(os, "add_dll_directory"):
-            try:
-                os.add_dll_directory(torch_lib)
-            except Exception:
-                pass
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        for dll_name in ["libiomp5md.dll", "c10.dll", "torch_cpu.dll", "torch.dll", "torch_python.dll"]:
-            dll_p = os.path.join(torch_lib, dll_name)
-            if os.path.exists(dll_p):
-                kernel32.LoadLibraryExW(dll_p, None, 0x00000008)
-
-import torch
-from ultralytics import YOLO
-
+import uuid
+import time
+import logging
 import streamlit as st
 import numpy as np
 import pandas as pd
-import time
-import logging
-import cv2
-import uuid
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from config import CONFIG
-from core.engine import CEIEngine
 from core.db_manager import DatabaseManager
 from core.reporting import generate_csv_report
 from core import global_state
@@ -101,8 +77,6 @@ if "active_session_id" not in st.session_state:
     st.session_state.active_session_id = None
 if "telemetry_buffer" not in st.session_state:
     st.session_state.telemetry_buffer = []
-if "engine" not in st.session_state:
-    st.session_state.engine = None
 if "session_ended" not in st.session_state:
     st.session_state.session_ended = False
 
