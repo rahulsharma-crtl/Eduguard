@@ -38,6 +38,7 @@ from core.reporting import generate_csv_report
 from core import global_state
 from core import dashboard_ui
 from components.teacher_room import teacher_room
+from components.student_room import student_room
 
 # Page Setup
 st.set_page_config(
@@ -218,41 +219,15 @@ if st.session_state.role == "Teacher":
 
 
 # ==========================================
-# STUDENT PRIVACY WIREFRAME VIEW (NATIVE IN-PLACE STREAM)
+# STUDENT PRIVACY CONFERENCE VIEW (WEBRTC + MEDIAPIPE)
 # ==========================================
 elif st.session_state.role == "Student":
     st.sidebar.markdown(f"### 🧑‍🎓 Student: {st.session_state.username}")
-    st.sidebar.info("🛡️ Privacy Mode Active:\nYour facial mesh is processed locally on your device. Zero raw video is saved or transmitted.")
+    st.sidebar.info("🛡️ Privacy Mode Active:\nYour facial mesh is processed locally in your browser. Zero raw video is saved or transmitted.")
     
     stop_stream = st.sidebar.button("⏹️ Leave Classroom")
     
-    st.title("📚 Interactive Privacy Classroom")
-    st.caption("Live MediaPipe Face Mesh Wireframe Stream & Cognitive Engagement Evaluation.")
-    
-    # Pre-allocate containers ONCE in the DOM layout
-    metric_cols = st.columns(4)
-    col_cei = metric_cols[0].empty()
-    col_att = metric_cols[1].empty()
-    col_dis = metric_cols[2].empty()
-    col_sts = metric_cols[3].empty()
-    
-    st.divider()
-    
-    stream_col, trend_col = st.columns([0.55, 0.45])
-    
-    with stream_col:
-        st.subheader("🔴 Live Privacy Wireframe Feed")
-        video_placeholder = st.empty()
-        
-    with trend_col:
-        st.subheader("📈 Dynamic CEI Timeline")
-        chart_placeholder = st.empty()
-
     if stop_stream:
-        if st.session_state.engine and st.session_state.engine.is_running:
-            st.session_state.engine.stop()
-            st.session_state.engine = None
-            
         if st.session_state.active_session_id is not None:
             if len(st.session_state.telemetry_buffer) > 0:
                 db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
@@ -265,91 +240,59 @@ elif st.session_state.role == "Student":
         st.query_params.clear()
         st.rerun()
 
-    # Initialize CEIEngine if needed
-    if st.session_state.engine is None:
-        st.session_state.engine = CEIEngine()
-        st.session_state.engine.start()
-        
-    engine = st.session_state.engine
-    
+    st.title("📚 Interactive Privacy Classroom")
+    st.caption("Live In-Browser MediaPipe Mesh, WebRTC Lecture Stream & Real-Time Engagement Telemetry.")
+
     if st.session_state.active_session_id is None:
         st.session_state.active_session_id = db.create_session(
             room_id=st.session_state.room_id,
             student_name=st.session_state.username,
             start_time=time.time()
         )
-        
-    frame_idx = 0
-    
-    # --- NATIVE IN-PLACE HIGH-PERFORMANCE VIDEO STREAM LOOP ---
-    # Overwrites video_placeholder directly over WebSocket without invoking st.rerun()!
-    try:
-        while True:
-            analytics = engine.step()
-            frame_idx += 1
-            
-            cei = analytics["cei_score"]
-            att = analytics["attentiveness"]
-            dis = analytics["distraction"]
-            msg = analytics["status_message"]
-            alerts = analytics["alerts"]
-            
-            # 1. Compress canvas to JPEG to reduce WebSocket bandwidth by ~95%
-            canvas = analytics["privacy_canvas"]
-            success, encoded_jpg = cv2.imencode('.jpg', canvas, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            if success:
-                video_placeholder.image(encoded_jpg.tobytes(), channels="BGR", use_container_width=True)
-            else:
-                video_placeholder.image(canvas, channels="BGR", use_container_width=True)
-            
-            # 2. Update Heartbeat & Telemetry
-            global_state.update_student_presence(
-                room_id=st.session_state.room_id,
-                student_name=st.session_state.username,
-                cei_score=cei,
-                status=msg
-            )
-            
-            st.session_state.telemetry_buffer.append({
-                "timestamp": time.time(),
-                "cei": cei,
-                "attentiveness": att,
-                "distraction": dis,
-                "status": msg
-            })
-            
-            # Commit batch every 60 frames (~2 seconds)
-            if len(st.session_state.telemetry_buffer) >= 60:
-                db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
-                st.session_state.telemetry_buffer.clear()
-                
-            # 3. Update UI Metrics Responsively (every 5 frames or instantly on alert)
-            if frame_idx % 5 == 0 or len(alerts) > 0 or dis > 0.05:
-                col_cei.metric(label="Composite Engagement Index", value=f"{cei * 100:.1f}%")
-                col_att.metric(label="Spatial Attentiveness Focus", value=f"{att * 100:.1f}%")
-                col_dis.metric(label="Environmental Distraction Load", value=f"{dis * 100:.1f}%")
-                
-                badge_class = "status-normal"
-                if len(alerts) > 0 or dis >= 0.5:
-                    badge_class = "status-alert"
-                elif dis > 0.15 or att < 0.6:
-                    badge_class = "status-warn"
-                    
-                col_sts.markdown(f'<div class="status-badge {badge_class}">{msg}</div>', unsafe_allow_html=True)
-                
-            # 4. Update Dynamic CEI Line Chart every 15 frames (~500ms)
-            if frame_idx % 15 == 0:
-                st.session_state.cei_history.append(cei)
-                if len(st.session_state.cei_history) > 100:
-                    st.session_state.cei_history.pop(0)
-                    
-                df_trend = pd.DataFrame({"CEI Score": st.session_state.cei_history})
-                chart_placeholder.line_chart(df_trend, height=340)
-                
-            time.sleep(0.001) # Yield execution cleanly without artificial frame lag
-    finally:
-        # Guarantee any uncommitted telemetry in buffer is persisted on exit
-        if st.session_state.active_session_id is not None and len(st.session_state.telemetry_buffer) > 0:
+
+    # Render Student WebRTC Conference & Local Privacy Mesh Component
+    telemetry = student_room(
+        room_id=st.session_state.room_id,
+        student_name=st.session_state.username,
+        key="student_conference_view"
+    )
+
+    # Process incoming real-time kinematics and engagement dispatch
+    if telemetry and isinstance(telemetry, dict):
+        cei = float(telemetry.get("cei_score", 1.0))
+        att = float(telemetry.get("attentiveness", 1.0))
+        dis = float(telemetry.get("distraction", 0.0))
+        msg = str(telemetry.get("status", "Attentive"))
+
+        # Update Live Heartbeat & Telemetry
+        global_state.update_student_presence(
+            room_id=st.session_state.room_id,
+            student_name=st.session_state.username,
+            cei_score=cei,
+            status=msg
+        )
+
+        st.session_state.telemetry_buffer.append({
+            "timestamp": time.time(),
+            "cei": cei,
+            "attentiveness": att,
+            "distraction": dis,
+            "status": msg
+        })
+
+        if len(st.session_state.telemetry_buffer) >= 30:
             db.insert_telemetry_batch(st.session_state.active_session_id, st.session_state.telemetry_buffer)
             st.session_state.telemetry_buffer.clear()
+
+        st.session_state.cei_history.append(cei)
+        if len(st.session_state.cei_history) > 100:
+            st.session_state.cei_history.pop(0)
+
+    # Real-Time CEI Engagement Trend Chart
+    if len(st.session_state.cei_history) > 1:
+        st.divider()
+        st.subheader("📈 Live Engagement Timeline (Session Progress)")
+        df_trend = pd.DataFrame({"CEI Engagement Score": st.session_state.cei_history})
+        st.line_chart(df_trend, height=220)
+
 

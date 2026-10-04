@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduGuard Student Privacy Conference</title>
+
+    <!-- PeerJS WebRTC Library -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+    <!-- MediaPipe Vision CDNs -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --bg-color: #0E1117;
+            --surface-color: #161B22;
+            --surface-hover: #21262D;
+            --border-color: rgba(78, 107, 255, 0.25);
+            --primary-accent: #4E6BFF;
+            --success-color: #22C55E;
+            --warn-color: #FACC15;
+            --danger-color: #EF4444;
+            --text-main: #FAFAFA;
+            --text-dim: #8B949E;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow-x: hidden;
+            padding: 10px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            width: 100%;
+        }
+
+        /* Top Header Info */
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px 18px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .badge-pill {
+            font-size: 0.85rem;
+            background: rgba(78, 107, 255, 0.15);
+            border: 1px solid var(--primary-accent);
+            color: #8da4ff;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .status-connecting {
+            background: rgba(250, 204, 21, 0.15);
+            border: 1px solid var(--warn-color);
+            color: var(--warn-color);
+        }
+
+        .status-connected {
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid var(--success-color);
+            color: var(--success-color);
+        }
+
+        .status-alert {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+            display: inline-block;
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        /* Dual-Pane Conference Stage */
+        .stage-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 900px) {
+            .stage-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel-card {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            position: relative;
+        }
+
+        .panel-header {
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .video-box {
+            position: relative;
+            background: #000;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .video-box video, .video-box canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .feed-overlay {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(14, 17, 23, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(4px);
+        }
+
+        .privacy-pill {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(34, 197, 94, 0.2);
+            border: 1px solid var(--success-color);
+            color: #4ade80;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Controls Toolbar */
+        .controls-toolbar {
+            display: flex;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.25);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            justify-content: center;
+        }
+
+        .ctrl-btn {
+            background: var(--surface-hover);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: var(--text-main);
+            padding: 7px 14px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .ctrl-btn:hover {
+            background: rgba(78, 107, 255, 0.2);
+            border-color: var(--primary-accent);
+        }
+
+        .ctrl-btn.off {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: var(--danger-color);
+            color: #f87171;
+        }
+
+        /* Engagement Telemetry HUD Strip */
+        .telemetry-strip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px 18px;
+        }
+
+        @media (max-width: 768px) {
+            .telemetry-strip {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .metric-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .metric-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .metric-progress {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 100%;
+            background: var(--primary-accent);
+            border-radius: 3px;
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="main_container">
+        <!-- Top Status Bar -->
+        <div class="header-bar">
+            <div class="user-info">
+                <span class="badge-pill" id="room_badge">Classroom: Connecting...</span>
+                <span class="badge-pill" id="student_badge">Student: Ready</span>
+            </div>
+            <div id="conn_status_badge" class="connection-status status-connecting">
+                <span class="pulse-dot"></span>
+                <span id="conn_status_text">Connecting to Teacher WebRTC...</span>
+            </div>
+        </div>
+
+        <!-- Dual-Pane Stage -->
+        <div class="stage-grid">
+            <!-- Left Pane: Live Teacher Broadcast Feed -->
+            <div class="panel-card">
+                <div class="panel-header">
+                    <span>📡 Teacher Live Broadcast</span>
+                    <span id="teacher_stream_tag" style="color: var(--warn-color); font-size: 0.75rem;">Waiting for feed...</span>
+                </div>
+                <div class="video-box">
+                    <video id="teacher_feed" autoplay playsinline></video>
+                    <div class="feed-overlay">
+                        <span>👨‍🏫 Teacher Broadcast</span>
+                    </div>
+                </div>
+                <div class="controls-toolbar">
+                    <button id="toggle_teacher_audio_btn" class="ctrl-btn">
+                        <span>🔊</span> Mute Lecture Audio
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Pane: Student Local Privacy Mesh -->
+            <div class="panel-card">
+                <div class="panel-header">
+                    <span>🛡️ Local Privacy Mesh Stream</span>
+                    <span style="color: var(--success-color); font-size: 0.75rem;">Vector Wireframe Only</span>
+                </div>
+                <div class="video-box">
+                    <!-- HIDDEN PHYSICAL WEBCAM (Strictly display: none for privacy isolation) -->
+                    <video id="raw_webcam" style="display: none;" playsinline muted></video>
+
+                    <!-- Anonymized Pitch-Black Canvas with Neon Wireframe -->
+                    <canvas id="privacy_canvas" width="640" height="480"></canvas>
+
+                    <div class="privacy-pill">
+                        <span>🔒</span> Zero Raw Video Transmitted
+                    </div>
+                    <div class="feed-overlay">
+                        <span id="kinematics_tag">🧑‍🎓 Privacy Mesh Active</span>
+                    </div>
+                </div>
+                <div class="controls-toolbar">
+                    <button id="toggle_student_mic_btn" class="ctrl-btn">
+                        <span id="mic_icon">🎙️</span> Mute My Mic
+                    </button>
+                    <button id="toggle_student_cam_btn" class="ctrl-btn">
+                        <span id="cam_icon">📹</span> Stop My Video
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Telemetry HUD Strip -->
+        <div class="telemetry-strip">
+            <div class="metric-cell">
+                <span class="metric-label">Composite Engagement</span>
+                <span class="metric-value" id="val_cei">100.0%</span>
+                <div class="metric-progress">
+                    <div class="progress-bar" id="bar_cei" style="width: 100%;"></div>
+                </div>
+            </div>
+            <div class="metric-cell">
+                <span class="metric-label">Spatial Attentiveness</span>
+                <span class="metric-value" id="val_att">100.0%</span>
+                <div class="metric-progress">
+                    <div class="progress-bar" id="bar_att" style="width: 100%; background: var(--success-color);"></div>
+                </div>
+            </div>
+            <div class="metric-cell">
+                <span class="metric-label">Eye Aspect Ratio (EAR)</span>
+                <span class="metric-value" id="val_ear">0.32</span>
+                <div class="metric-progress">
+                    <div class="progress-bar" id="bar_ear" style="width: 70%; background: #00E5FF;"></div>
+                </div>
+            </div>
+            <div class="metric-cell">
+                <span class="metric-label">Engagement Status</span>
+                <span class="metric-value" id="val_status" style="font-size: 1.05rem; color: #4ade80;">Attentive</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Streamlit Bridge Messaging Protocol ---
+        const Streamlit = {
+            setComponentReady: function() {
+                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
+            },
+            setFrameHeight: function(height) {
+                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: height }, "*");
+            },
+            setComponentValue: function(value) {
+                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value }, "*");
+            }
+        };
+
+        function resizeIframe() {
+            const h = document.getElementById("main_container").offsetHeight + 24;
+            Streamlit.setFrameHeight(Math.max(h, 540));
+        }
+
+        new ResizeObserver(resizeIframe).observe(document.getElementById("main_container"));
+
+        // DOM Elements
+        const rawWebcam = document.getElementById("raw_webcam");
+        const privacyCanvas = document.getElementById("privacy_canvas");
+        const ctx = privacyCanvas.getContext("2d");
+        const teacherFeed = document.getElementById("teacher_feed");
+        const teacherStreamTag = document.getElementById("teacher_stream_tag");
+        const connStatusBadge = document.getElementById("conn_status_badge");
+        const connStatusText = document.getElementById("conn_status_text");
+        const roomBadge = document.getElementById("room_badge");
+        const studentBadge = document.getElementById("student_badge");
+        const kinematicsTag = document.getElementById("kinematics_tag");
+
+        const valCEI = document.getElementById("val_cei");
+        const valATT = document.getElementById("val_att");
+        const valEAR = document.getElementById("val_ear");
+        const valStatus = document.getElementById("val_status");
+        const barCEI = document.getElementById("bar_cei");
+        const barATT = document.getElementById("bar_att");
+        const barEAR = document.getElementById("bar_ear");
+
+        const toggleTeacherAudioBtn = document.getElementById("toggle_teacher_audio_btn");
+        const toggleStudentMicBtn = document.getElementById("toggle_student_mic_btn");
+        const toggleStudentCamBtn = document.getElementById("toggle_student_cam_btn");
+        const micIcon = document.getElementById("mic_icon");
+        const camIcon = document.getElementById("cam_icon");
+
+        // State
+        let localUserMedia = null;
+        let virtualCanvasStream = null;
+        let peer = null;
+        let activeCall = null;
+        let currentRoomId = null;
+        let currentStudentName = "Student";
+
+        // Kinematics Counters
+        let consecutiveClosedFrames = 0;
+        let frameCount = 0;
+        let lastDispatchTime = 0;
+
+        function setConnectionStatus(type, msg) {
+            connStatusBadge.className = `connection-status status-${type}`;
+            connStatusText.innerText = msg;
+        }
+
+        // --- 2. 6-Point EAR and Kinematics Math ---
+        function ptDist(p1, p2) {
+            const dx = (p1.x - p2.x) * 640;
+            const dy = (p1.y - p2.y) * 480;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function computeEAR(landmarks, indices) {
+            const p1 = landmarks[indices[0]];
+            const p2 = landmarks[indices[1]];
+            const p3 = landmarks[indices[2]];
+            const p4 = landmarks[indices[3]];
+            const p5 = landmarks[indices[4]];
+            const p6 = landmarks[indices[5]];
+
+            const v1 = ptDist(p2, p6);
+            const v2 = ptDist(p3, p5);
+            const h = ptDist(p1, p4);
+
+            if (h < 1e-5) return 0.0;
+            return (v1 + v2) / (2.0 * h);
+        }
+
+        // --- 3. MediaPipe FaceMesh & Canvas Anonymization Loop ---
+        function onFaceMeshResults(results) {
+            frameCount++;
+
+            // STRICT PRIVACY: Fill solid black canvas. Raw webcam pixels are NEVER drawn!
+            ctx.save();
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0, 0, privacyCanvas.width, privacyCanvas.height);
+
+            let presence = 0.0;
+            let attentiveness = 1.0;
+            let distraction = 0.0;
+            let avgEAR = 0.0;
+            let isDrowsy = false;
+            let isLookingAway = false;
+            let isLookingDown = false;
+            let statusStr = "Person Absent";
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                presence = 1.0;
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // Render Neon Wireframe Mesh
+                // 1. Subtle cyan/green interior tessellation
+                if (window.FACEMESH_TESSELATION) {
+                    drawConnectors(ctx, landmarks, FACEMESH_TESSELATION, { color: "rgba(0, 255, 180, 0.35)", lineWidth: 1 });
+                }
+                // 2. Neon Cyan contours (Eyes, Oval, Brows)
+                if (window.FACEMESH_FACE_OVAL) {
+                    drawConnectors(ctx, landmarks, FACEMESH_FACE_OVAL, { color: "#4E6BFF", lineWidth: 2 });
+                }
+                if (window.FACEMESH_RIGHT_EYE) {
+                    drawConnectors(ctx, landmarks, FACEMESH_RIGHT_EYE, { color: "#00E5FF", lineWidth: 2 });
+                }
+                if (window.FACEMESH_LEFT_EYE) {
+                    drawConnectors(ctx, landmarks, FACEMESH_LEFT_EYE, { color: "#00E5FF", lineWidth: 2 });
+                }
+                if (window.FACEMESH_LIPS) {
+                    drawConnectors(ctx, landmarks, FACEMESH_LIPS, { color: "#FF4E8D", lineWidth: 2 });
+                }
+                if (window.FACEMESH_IRISES) {
+                    drawConnectors(ctx, landmarks, FACEMESH_IRISES, { color: "#FFA500", lineWidth: 2 });
+                }
+
+                // --- 6-Point Soukupová & Čech EAR Formula ---
+                // Right Eye: [33, 160, 158, 133, 153, 144]
+                // Left Eye:  [362, 385, 387, 263, 373, 380]
+                const rightEAR = computeEAR(landmarks, [33, 160, 158, 133, 153, 144]);
+                const leftEAR = computeEAR(landmarks, [362, 385, 387, 263, 373, 380]);
+                avgEAR = (rightEAR + leftEAR) / 2.0;
+
+                // Temporal Debouncing for Blinks:
+                // >= 15 consecutive frames under 0.21 triggers drowsiness alert
+                if (avgEAR < 0.21) {
+                    consecutiveClosedFrames++;
+                } else {
+                    consecutiveClosedFrames = 0;
+                }
+
+                if (consecutiveClosedFrames >= 15) {
+                    isDrowsy = true;
+                    attentiveness -= 0.50;
+                    statusStr = "Drowsy (Eyes Closed)";
+                } else if (consecutiveClosedFrames > 4) {
+                    // Slight penalty if closing longer than natural micro-blink
+                    attentiveness -= 0.15;
+                }
+
+                // --- 2D Head Pose Heuristics ---
+                // Yaw: nose tip (1) vs left/right corners (263, 33)
+                const nose = landmarks[1];
+                const eyeLeft = landmarks[263];
+                const eyeRight = landmarks[33];
+                const dL = Math.abs(eyeLeft.x - nose.x);
+                const dR = Math.abs(nose.x - eyeRight.x);
+                const yawRatio = (dR > 0) ? (dL / dR) : 1.0;
+                if (yawRatio < 0.40 || yawRatio > 2.3) {
+                    isLookingAway = true;
+                    attentiveness -= 0.35;
+                    distraction += 0.30;
+                    if (!isDrowsy) statusStr = "Looking Away";
+                }
+
+                // Pitch: nose tip (1), forehead (10), chin (152)
+                const forehead = landmarks[10];
+                const chin = landmarks[152];
+                const dTop = Math.abs(nose.y - forehead.y);
+                const dBot = Math.abs(chin.y - nose.y);
+                const pitchRatio = (dBot > 0) ? (dTop / dBot) : 1.0;
+                if (pitchRatio < 0.45 || pitchRatio > 2.3) {
+                    isLookingDown = true;
+                    attentiveness -= 0.25;
+                    distraction += 0.20;
+                    if (!isDrowsy && !isLookingAway) statusStr = "Looking Down";
+                }
+
+                if (!isDrowsy && !isLookingAway && !isLookingDown) {
+                    statusStr = "Attentive";
+                }
+            } else {
+                presence = 0.0;
+                attentiveness = 0.0;
+                statusStr = "Subject Absent";
+            }
+
+            ctx.restore();
+
+            // CEI Formula: E = (0.30 * P) + (0.45 * A) - (0.25 * D)
+            attentiveness = Math.max(0.0, Math.min(1.0, attentiveness));
+            distraction = Math.max(0.0, Math.min(1.0, distraction));
+            const rawCEI = (0.30 * presence) + (0.45 * attentiveness) - (0.25 * distraction);
+            const ceiScore = Math.max(0.0, Math.min(1.0, rawCEI));
+
+            // Update UI HUD
+            valCEI.innerText = `${(ceiScore * 100).toFixed(1)}%`;
+            valATT.innerText = `${(attentiveness * 100).toFixed(1)}%`;
+            valEAR.innerText = avgEAR.toFixed(2);
+            valStatus.innerText = statusStr;
+
+            barCEI.style.width = `${ceiScore * 100}%`;
+            barATT.style.width = `${attentiveness * 100}%`;
+            barEAR.style.width = `${Math.min(100, (avgEAR / 0.4) * 100)}%`;
+
+            if (isDrowsy) {
+                valStatus.style.color = "var(--danger-color)";
+                kinematicsTag.innerText = "⚠️ Alert: Prolonged Eye Closure";
+            } else if (isLookingAway || isLookingDown) {
+                valStatus.style.color = "var(--warn-color)";
+                kinematicsTag.innerText = "⚠️ Alert: Gaze Divergent";
+            } else {
+                valStatus.style.color = "var(--success-color)";
+                kinematicsTag.innerText = "🧑‍🎓 Privacy Mesh Active (Attentive)";
+            }
+
+            // Dispatch to Streamlit once every ~500ms (15 frames)
+            const now = Date.now();
+            if (now - lastDispatchTime > 500) {
+                lastDispatchTime = now;
+                Streamlit.setComponentValue({
+                    cei_score: ceiScore,
+                    attentiveness: attentiveness,
+                    distraction: distraction,
+                    presence: presence,
+                    ear: avgEAR,
+                    is_drowsy: isDrowsy,
+                    is_looking_away: isLookingAway,
+                    status: statusStr
+                });
+            }
+        }
+
+        // --- 4. Initialize Local Webcam & Virtual Canvas Stream ---
+        async function initLocalStream() {
+            try {
+                localUserMedia = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                    audio: true
+                });
+                rawWebcam.srcObject = localUserMedia;
+                await rawWebcam.play();
+
+                // Create Virtual Synthetic Video Track from Privacy Canvas
+                virtualCanvasStream = privacyCanvas.captureStream(25);
+
+                // Add mic audio track to the canvas stream so teacher can hear student
+                const audioTracks = localUserMedia.getAudioTracks();
+                if (audioTracks.length > 0) {
+                    virtualCanvasStream.addTrack(audioTracks[0]);
+                }
+
+                // Initialize MediaPipe FaceMesh
+                const faceMesh = new FaceMesh({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+                });
+
+                faceMesh.setOptions({
+                    maxNumFaces: 1,
+                    refineLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                faceMesh.onResults(onFaceMeshResults);
+
+                // Start Camera frame ingest loop
+                const camera = new Camera(rawWebcam, {
+                    onFrame: async () => {
+                        await faceMesh.send({ image: rawWebcam });
+                    },
+                    width: 640,
+                    height: 480
+                });
+                camera.start();
+
+                console.log("Local camera and FaceMesh initialized successfully.");
+            } catch (err) {
+                console.error("Local camera initialization failed:", err);
+                setConnectionStatus("alert", "Camera Permission Denied");
+            }
+        }
+
+        // --- 5. WebRTC Peer Connection & Call to Teacher ---
+        function initStudentPeer(roomId, studentName) {
+            if (peer && !peer.destroyed) return;
+
+            const cleanRoom = roomId.replace(/[^a-zA-Z0-9_-]/g, "");
+            const cleanName = studentName.replace(/[^a-zA-Z0-9_-]/g, "") || "Student";
+            const studentPeerId = `${cleanRoom}-student-${cleanName}-${Math.floor(Math.random() * 10000)}`;
+            const teacherPeerId = `${cleanRoom}-teacher`;
+
+            roomBadge.innerText = `Classroom: ${cleanRoom}`;
+            studentBadge.innerText = `Student: ${cleanName}`;
+            setConnectionStatus("connecting", "Calling Teacher Broadcast...");
+
+            peer = new Peer(studentPeerId, {
+                debug: 1,
+                config: {
+                    iceServers: [
+                        { urls: "stun:stun.l.google.com:19302" },
+                        { urls: "stun:stun1.l.google.com:19302" },
+                        { urls: "stun:stun2.l.google.com:19302" }
+                    ]
+                }
+            });
+
+            peer.on("open", (id) => {
+                console.log(`Student peer registered with ID: ${id}`);
+                callTeacher(teacherPeerId);
+            });
+
+            peer.on("error", (err) => {
+                console.error("PeerJS error:", err);
+                if (err.type === "peer-unavailable") {
+                    setConnectionStatus("connecting", "Waiting for Teacher to Start Broadcast...");
+                    // Retry calling teacher after 3 seconds
+                    setTimeout(() => callTeacher(teacherPeerId), 3000);
+                } else {
+                    setConnectionStatus("alert", `WebRTC: ${err.type || "Error"}`);
+                }
+            });
+        }
+
+        function callTeacher(teacherPeerId) {
+            if (!peer || peer.destroyed || !virtualCanvasStream) return;
+
+            console.log(`Initiating outbound WebRTC call to teacher: ${teacherPeerId}`);
+            activeCall = peer.call(teacherPeerId, virtualCanvasStream);
+
+            activeCall.on("stream", (teacherStream) => {
+                console.log("Attached incoming live teacher broadcast stream.");
+                teacherFeed.srcObject = teacherStream;
+                teacherStreamTag.innerText = "Broadcasting Live";
+                teacherStreamTag.style.color = "var(--success-color)";
+                setConnectionStatus("connected", "Connected to Teacher Live");
+            });
+
+            activeCall.on("close", () => {
+                console.log("Teacher stream closed.");
+                teacherStreamTag.innerText = "Broadcast Ended";
+                teacherStreamTag.style.color = "var(--danger-color)";
+                setConnectionStatus("connecting", "Teacher Stream Disconnected");
+            });
+
+            activeCall.on("error", (err) => {
+                console.warn("Call error with teacher:", err);
+                setTimeout(() => callTeacher(teacherPeerId), 3000);
+            });
+        }
+
+        // --- 6. Control Handlers ---
+        toggleTeacherAudioBtn.addEventListener("click", () => {
+            teacherFeed.muted = !teacherFeed.muted;
+            if (teacherFeed.muted) {
+                toggleTeacherAudioBtn.classList.add("off");
+                toggleTeacherAudioBtn.innerHTML = `<span>🔇</span> Unmute Lecture`;
+            } else {
+                toggleTeacherAudioBtn.classList.remove("off");
+                toggleTeacherAudioBtn.innerHTML = `<span>🔊</span> Mute Lecture Audio`;
+            }
+        });
+
+        toggleStudentMicBtn.addEventListener("click", () => {
+            if (!localUserMedia) return;
+            const audioTrack = localUserMedia.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                if (audioTrack.enabled) {
+                    toggleStudentMicBtn.classList.remove("off");
+                    toggleStudentMicBtn.innerHTML = `<span>🎙️</span> Mute My Mic`;
+                } else {
+                    toggleStudentMicBtn.classList.add("off");
+                    toggleStudentMicBtn.innerHTML = `<span>🔇</span> Mic Muted`;
+                }
+            }
+        });
+
+        toggleStudentCamBtn.addEventListener("click", () => {
+            if (!localUserMedia) return;
+            const videoTrack = localUserMedia.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                if (videoTrack.enabled) {
+                    toggleStudentCamBtn.classList.remove("off");
+                    toggleStudentCamBtn.innerHTML = `<span>📹</span> Stop My Video`;
+                } else {
+                    toggleStudentCamBtn.classList.add("off");
+                    toggleStudentCamBtn.innerHTML = `<span>🚫</span> Video Stopped`;
+                }
+            }
+        });
+
+        // --- 7. Streamlit Render Event Listener ---
+        window.addEventListener("message", (event) => {
+            if (event.data && event.data.type === "streamlit:render") {
+                const args = event.data.args;
+                if (args && args.roomId) {
+                    currentRoomId = args.roomId;
+                    currentStudentName = args.studentName || "Student";
+                    initStudentPeer(currentRoomId, currentStudentName);
+                }
+                resizeIframe();
+            }
+        });
+
+        // Initialize Local Hardware & Handshake
+        initLocalStream().then(() => {
+            Streamlit.setComponentReady();
+            resizeIframe();
+        });
+    </script>
+</body>
+</html>
