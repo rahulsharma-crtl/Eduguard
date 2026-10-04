@@ -97,7 +97,11 @@ if room_from_url is None and st.session_state.role != "Teacher":
             submitted = st.form_submit_button("Launch Classroom", type="primary", use_container_width=True)
             
             if submitted:
-                if teacher_pass != "admin123":
+                admin_password = os.getenv("TEACHER_ADMIN_PASSWORD", "admin123")
+                if hasattr(st, "secrets") and "TEACHER_ADMIN_PASSWORD" in st.secrets:
+                    admin_password = st.secrets["TEACHER_ADMIN_PASSWORD"]
+
+                if teacher_pass != admin_password:
                     st.error("Incorrect Admin Password.")
                 elif not room_name.strip():
                     st.error("Please provide a Classroom Name.")
