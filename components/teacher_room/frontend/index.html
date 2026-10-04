@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduGuard Teacher Broadcast</title>
+    <!-- PeerJS CDN -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0E1117;
+            --surface-color: #161B22;
+            --surface-hover: #21262D;
+            --border-color: rgba(78, 107, 255, 0.25);
+            --primary-accent: #4E6BFF;
+            --success-color: #22C55E;
+            --warn-color: #FACC15;
+            --danger-color: #EF4444;
+            --text-main: #FAFAFA;
+            --text-dim: #8B949E;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow-x: hidden;
+            padding: 10px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            width: 100%;
+        }
+
+        /* Top Header Bar */
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px 18px;
+        }
+
+        .room-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .room-badge {
+            font-size: 0.85rem;
+            background: rgba(78, 107, 255, 0.15);
+            border: 1px solid var(--primary-accent);
+            color: #8da4ff;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .status-connecting {
+            background: rgba(250, 204, 21, 0.15);
+            border: 1px solid var(--warn-color);
+            color: var(--warn-color);
+        }
+
+        .status-broadcasting {
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid var(--success-color);
+            color: var(--success-color);
+        }
+
+        .status-error {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+            display: inline-block;
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        /* Video Showcase Layout */
+        .video-stage {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 16px;
+        }
+
+        @media (max-width: 900px) {
+            .video-stage {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Teacher Local Card */
+        .teacher-pod {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .pod-title {
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .video-wrapper {
+            position: relative;
+            background: #000;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 0;
+            background-color: #000;
+        }
+
+        .video-overlay-tag {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(14, 17, 23, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Controls */
+        .controls-toolbar {
+            display: flex;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.25);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            justify-content: center;
+        }
+
+        .ctrl-btn {
+            background: var(--surface-hover);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: var(--text-main);
+            padding: 7px 14px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .ctrl-btn:hover {
+            background: rgba(78, 107, 255, 0.2);
+            border-color: var(--primary-accent);
+        }
+
+        .ctrl-btn.off {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: var(--danger-color);
+            color: #f87171;
+        }
+
+        /* Students Section */
+        .students-section {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 280px;
+        }
+
+        .students-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .students-header h3 {
+            font-size: 0.95rem;
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .students-count {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 3px 8px;
+            border-radius: 12px;
+        }
+
+        /* Dynamic Expanding Grid */
+        #students_grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 12px;
+            width: 100%;
+        }
+
+        .empty-grid-msg {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 40px 10px;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            border: 2px dashed rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-md);
+        }
+
+        .student-tile {
+            position: relative;
+            background: #000;
+            border: 1px solid rgba(78, 107, 255, 0.2);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            aspect-ratio: 4 / 3;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .student-tile:hover {
+            border-color: var(--primary-accent);
+            transform: translateY(-2px);
+        }
+
+        .student-tile video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .student-tile-tag {
+            position: absolute;
+            bottom: 6px;
+            left: 6px;
+            background: rgba(14, 17, 23, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            color: #fff;
+            max-width: 85%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="main_container">
+        <!-- Top Status Bar -->
+        <div class="header-bar">
+            <div class="room-meta">
+                <span class="room-badge" id="room_badge">Room: Initializing...</span>
+                <span style="font-size: 0.85rem; color: var(--text-dim);" id="peer_id_label">Peer ID: connecting...</span>
+            </div>
+            <div id="status_badge" class="status-badge status-connecting">
+                <span class="pulse-dot"></span>
+                <span id="status_text">Initializing Broadcast...</span>
+            </div>
+        </div>
+
+        <!-- Video Stage -->
+        <div class="video-stage">
+            <!-- Left: Teacher Broadcast Pod -->
+            <div class="teacher-pod">
+                <div class="pod-title">
+                    <span>📡 Teacher Live Feed</span>
+                    <span style="color: var(--success-color); font-size: 0.75rem;">1080p HD</span>
+                </div>
+                <div class="video-wrapper">
+                    <!-- Local video is muted to prevent self-echo -->
+                    <video id="teacher_video" autoplay playsinline muted></video>
+                    <div class="video-overlay-tag">
+                        <span>👨‍🏫 You (Broadcasting)</span>
+                    </div>
+                </div>
+                <!-- Control Bar -->
+                <div class="controls-toolbar">
+                    <button id="toggle_mic_btn" class="ctrl-btn">
+                        <span id="mic_icon">🎙️</span> Mute Mic
+                    </button>
+                    <button id="toggle_cam_btn" class="ctrl-btn">
+                        <span id="cam_icon">📹</span> Stop Video
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right: Expanding Student Grid -->
+            <div class="students-section">
+                <div class="students-header">
+                    <h3>👥 Live Student Stream Grid</h3>
+                    <span id="students_count_badge" class="students-count">0 Connected</span>
+                </div>
+                <div id="students_grid">
+                    <div class="empty-grid-msg" id="empty_grid_msg">
+                        <span style="font-size: 1.6rem;">🎓</span>
+                        <span>Waiting for students to join room...</span>
+                        <span style="font-size: 0.75rem; color: #586069;">Incoming WebRTC streams will populate here dynamically.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebRTC & Streamlit Bridge Script -->
+    <script>
+        // Streamlit Component Messaging Bridge
+        const Streamlit = {
+            setComponentReady: function() {
+                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
+            },
+            setFrameHeight: function(height) {
+                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: height }, "*");
+            }
+        };
+
+        function resizeIframe() {
+            const h = document.getElementById("main_container").offsetHeight + 24;
+            Streamlit.setFrameHeight(Math.max(h, 460));
+        }
+
+        new ResizeObserver(resizeIframe).observe(document.getElementById("main_container"));
+
+        // State Variables
+        let localStream = null;
+        let peer = null;
+        let currentRoomId = null;
+        let connectedStudents = new Map(); // peerId -> { call, stream, element }
+
+        const teacherVideo = document.getElementById("teacher_video");
+        const statusBadge = document.getElementById("status_badge");
+        const statusText = document.getElementById("status_text");
+        const roomBadge = document.getElementById("room_badge");
+        const peerIdLabel = document.getElementById("peer_id_label");
+        const studentsGrid = document.getElementById("students_grid");
+        const emptyGridMsg = document.getElementById("empty_grid_msg");
+        const studentsCountBadge = document.getElementById("students_count_badge");
+
+        const toggleMicBtn = document.getElementById("toggle_mic_btn");
+        const toggleCamBtn = document.getElementById("toggle_cam_btn");
+        const micIcon = document.getElementById("mic_icon");
+        const camIcon = document.getElementById("cam_icon");
+
+        function setStatus(type, msg) {
+            statusBadge.className = `status-badge status-${type}`;
+            statusText.innerText = msg;
+        }
+
+        // 1. Capture Local Hardware Stream (Webcam & Microphone)
+        async function initCamera() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                    audio: true
+                });
+                teacherVideo.srcObject = localStream;
+                console.log("Local camera and mic stream captured successfully.");
+            } catch (err) {
+                console.error("Camera access error:", err);
+                setStatus("error", "Camera/Mic Permission Blocked");
+            }
+        }
+
+        // 2. Initialize PeerJS WebRTC Room Host
+        function initPeerRoom(roomId) {
+            if (peer && !peer.destroyed) {
+                return; // Already initialized for this room
+            }
+
+            // Sanitize roomId for standard PeerJS ID requirements
+            const cleanRoom = roomId.replace(/[^a-zA-Z0-9_-]/g, "");
+            const teacherPeerId = `${cleanRoom}-teacher`;
+
+            roomBadge.innerText = `Classroom: ${cleanRoom}`;
+            peerIdLabel.innerText = `Peer ID: ${teacherPeerId}`;
+            setStatus("connecting", "Registering WebRTC Peer...");
+
+            peer = new Peer(teacherPeerId, {
+                debug: 1,
+                config: {
+                    iceServers: [
+                        { urls: "stun:stun.l.google.com:19302" },
+                        { urls: "stun:stun1.l.google.com:19302" },
+                        { urls: "stun:stun2.l.google.com:19302" }
+                    ]
+                }
+            });
+
+            peer.on("open", (id) => {
+                console.log(`Teacher Peer registered successfully with ID: ${id}`);
+                setStatus("broadcasting", "Live Broadcasting Active");
+            });
+
+            peer.on("error", (err) => {
+                console.error("PeerJS error:", err);
+                if (err.type === "unavailable-id") {
+                    // If ID is occupied (e.g. from rapid page refresh), inform teacher
+                    setStatus("connecting", "Reconnecting Peer ID...");
+                    setTimeout(() => initPeerRoom(roomId), 2000);
+                } else {
+                    setStatus("error", `WebRTC: ${err.type || "Connection Error"}`);
+                }
+            });
+
+            // 3. Listen for Incoming Student Calls & Answer with Teacher Broadcast Stream
+            peer.on("call", (call) => {
+                console.log(`Incoming call from student peer: ${call.peer}`);
+                
+                // Answer call by transmitting teacher's local audio/video stream
+                if (localStream) {
+                    call.answer(localStream);
+                } else {
+                    // Fallback to empty stream if camera wasn't authorized yet
+                    call.answer();
+                }
+
+                // Handle student's incoming media stream
+                call.on("stream", (remoteStream) => {
+                    console.log(`Received student stream from ${call.peer}`);
+                    renderStudentTile(call.peer, remoteStream, call);
+                });
+
+                call.on("close", () => {
+                    console.log(`Student call closed: ${call.peer}`);
+                    removeStudentTile(call.peer);
+                });
+
+                call.on("error", (err) => {
+                    console.warn(`Call error from ${call.peer}:`, err);
+                    removeStudentTile(call.peer);
+                });
+            });
+        }
+
+        // Render Student Video in Dynamic Expanding Grid
+        function renderStudentTile(peerId, stream, call) {
+            // Remove existing tile if already present
+            removeStudentTile(peerId);
+
+            if (emptyGridMsg) {
+                emptyGridMsg.style.display = "none";
+            }
+
+            const tile = document.createElement("div");
+            tile.className = "student-tile";
+            tile.id = `tile_${peerId}`;
+
+            const vid = document.createElement("video");
+            vid.autoplay = true;
+            vid.playsInline = true;
+            vid.srcObject = stream;
+
+            const tag = document.createElement("div");
+            tag.className = "student-tile-tag";
+            // Clean display name from peerId format `${cleanRoom}-student-${name}`
+            let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
+            tag.innerText = `🧑‍🎓 ${displayName || peerId}`;
+
+            tile.appendChild(vid);
+            tile.appendChild(tag);
+            studentsGrid.appendChild(tile);
+
+            connectedStudents.set(peerId, { call, stream, element: tile });
+            updateStudentCount();
+            resizeIframe();
+        }
+
+        function removeStudentTile(peerId) {
+            if (connectedStudents.has(peerId)) {
+                const item = connectedStudents.get(peerId);
+                if (item.element && item.element.parentNode) {
+                    item.element.parentNode.removeChild(item.element);
+                }
+                connectedStudents.delete(peerId);
+                updateStudentCount();
+                resizeIframe();
+            }
+
+            if (connectedStudents.size === 0 && emptyGridMsg) {
+                emptyGridMsg.style.display = "flex";
+            }
+        }
+
+        function updateStudentCount() {
+            const count = connectedStudents.size;
+            studentsCountBadge.innerText = `${count} Connected`;
+        }
+
+        // 4. Local Controls
+        toggleMicBtn.addEventListener("click", () => {
+            if (!localStream) return;
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                if (audioTrack.enabled) {
+                    toggleMicBtn.classList.remove("off");
+                    toggleMicBtn.innerHTML = `<span>🎙️</span> Mute Mic`;
+                } else {
+                    toggleMicBtn.classList.add("off");
+                    toggleMicBtn.innerHTML = `<span>🔇</span> Mic Muted`;
+                }
+            }
+        });
+
+        toggleCamBtn.addEventListener("click", () => {
+            if (!localStream) return;
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                if (videoTrack.enabled) {
+                    toggleCamBtn.classList.remove("off");
+                    toggleCamBtn.innerHTML = `<span>📹</span> Stop Video`;
+                } else {
+                    toggleCamBtn.classList.add("off");
+                    toggleCamBtn.innerHTML = `<span>🚫</span> Video Stopped`;
+                }
+            }
+        });
+
+        // 5. Streamlit Render Event Listener
+        window.addEventListener("message", (event) => {
+            if (event.data && event.data.type === "streamlit:render") {
+                const args = event.data.args;
+                if (args && args.roomId && args.roomId !== currentRoomId) {
+                    currentRoomId = args.roomId;
+                    initPeerRoom(currentRoomId);
+                }
+                resizeIframe();
+            }
+        });
+
+        // Kick off Camera & Streamlit handshake
+        initCamera().then(() => {
+            Streamlit.setComponentReady();
+            resizeIframe();
+        });
+    </script>
+</body>
+</html>

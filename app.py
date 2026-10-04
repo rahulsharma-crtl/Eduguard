@@ -37,6 +37,7 @@ from core.db_manager import DatabaseManager
 from core.reporting import generate_csv_report
 from core import global_state
 from core import dashboard_ui
+from components.teacher_room import teacher_room
 
 # Page Setup
 st.set_page_config(
@@ -174,11 +175,20 @@ if st.session_state.role == "Teacher":
     
     st.divider()
     
-    # Teacher Dashboard Grid
-    live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
-    total_joined = global_state.get_total_joined_students(st.session_state.room_id)
+    # Live Classroom Video Broadcast (WebRTC Peer Room)
+    st.markdown("### 🎥 Live Classroom Broadcast & Video Room")
+    teacher_room(st.session_state.room_id, key="teacher_broadcast_component")
     
-    dashboard_ui.render_teacher_dashboard(live_students, total_joined)
+    st.divider()
+    
+    # Teacher Dashboard Grid (Auto-refreshes metrics without disrupting WebRTC video)
+    @st.fragment(run_every="3s")
+    def render_teacher_telemetry():
+        live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
+        total_joined = global_state.get_total_joined_students(st.session_state.room_id)
+        dashboard_ui.render_teacher_dashboard(live_students, total_joined)
+        
+    render_teacher_telemetry()
     
     st.divider()
     
@@ -205,9 +215,6 @@ if st.session_state.role == "Teacher":
                     mime="text/csv",
                     use_container_width=True
                 )
-    
-    time.sleep(2.0)
-    st.rerun()
 
 
 # ==========================================
