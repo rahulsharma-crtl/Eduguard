@@ -98,8 +98,12 @@ if room_from_url is None and st.session_state.role != "Teacher":
             
             if submitted:
                 admin_password = os.getenv("TEACHER_ADMIN_PASSWORD", "admin123")
-                if hasattr(st, "secrets") and "TEACHER_ADMIN_PASSWORD" in st.secrets:
-                    admin_password = st.secrets["TEACHER_ADMIN_PASSWORD"]
+                try:
+                    if "TEACHER_ADMIN_PASSWORD" in st.secrets:
+                        admin_password = st.secrets["TEACHER_ADMIN_PASSWORD"]
+                except Exception:
+                    # Fall back to environment variable or default without crashing
+                    pass
 
                 if teacher_pass != admin_password:
                     st.error("Incorrect Admin Password.")
