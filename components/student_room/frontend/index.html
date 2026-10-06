@@ -755,9 +755,9 @@
                 kinematicsTag.innerText = "🧑‍🎓 Privacy Mesh Active (Attentive)";
             }
 
-            // Dispatch to Streamlit & Teacher once every ~500ms (15 frames)
+            // Dispatch to Streamlit & Teacher once every ~2.5s (reduces WebSocket event volume)
             const now = Date.now();
-            if (now - lastDispatchTime > 500) {
+            if (now - lastDispatchTime > 2500) {
                 lastDispatchTime = now;
                 const telemetryPayload = {
                     type: "telemetry",

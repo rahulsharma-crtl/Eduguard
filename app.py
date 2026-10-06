@@ -224,7 +224,7 @@ if st.session_state.role == "Teacher":
         st.divider()
         
         # Teacher Dashboard Grid (Auto-refreshes metrics without disrupting WebRTC video)
-        @st.fragment(run_every="3s")
+        @st.fragment(run_every="6s")
         def render_teacher_telemetry():
             live_students = global_state.get_live_students(st.session_state.room_id, timeout_seconds=6)
             total_joined = global_state.get_total_joined_students(st.session_state.room_id)
