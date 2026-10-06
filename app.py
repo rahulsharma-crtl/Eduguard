@@ -174,7 +174,8 @@ if st.session_state.role == "Teacher":
             st.rerun()
 
         # Shareable Student Link (One-Click Copy)
-        full_student_url = f"http://localhost:8501/?room={st.session_state.room_id}"
+        APP_BASE_URL = os.getenv("APP_BASE_URL", "https://eduguard-snpacn458vmf9tf8dqn7kn.streamlit.app")
+        full_student_url = f"{APP_BASE_URL}/?room={st.session_state.room_id}"
         st.markdown("### 📋 Student Shareable Link")
         st.caption("Share this URL with students. Clicking the copy button or code block copies the direct room access link.")
         
