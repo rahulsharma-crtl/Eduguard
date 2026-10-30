@@ -368,7 +368,7 @@ test('Empirical Benchmark: Calibrated Geometric Pipeline vs Legacy Heuristics', 
     console.log('\n===============================================================');
     console.log('       FACIAL BEHAVIOR BENCHMARK & EMPIRICAL EVALUATION         ');
     console.log('===============================================================');
-    console.log(`Evaluated Dataset: ${dataset.length} labeled video frames across 7 behavioral classes\n`);
+    console.log(`Evaluated Dataset: ${dataset.length} labeled synthetic landmark frames across 7 behavioral classes\n`);
 
     console.log('--- Multi-Class Confusion Matrix (Enhanced Calibrated Pipeline) ---');
     console.log('Rows: Ground Truth, Cols: Predicted Class');

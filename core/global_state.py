@@ -6,11 +6,23 @@ Thread-safe shared memory cache supporting live student counts, presence heartbe
 and real-time score tracking across multi-tenant classrooms.
 """
 
-import streamlit as st
+from functools import lru_cache
 import time
+import threading
+from functools import wraps
+
+_STATE_LOCK = threading.RLock()
+
+def synchronized(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        with _STATE_LOCK:
+            return function(*args, **kwargs)
+    return guarded
+
 from typing import Dict, Any, List
 
-@st.cache_resource
+@lru_cache(maxsize=1)
 def get_shared_state() -> Dict[str, Dict[str, Dict[str, Any]]]:
     """
     Format:
@@ -23,6 +35,7 @@ def get_shared_state() -> Dict[str, Dict[str, Dict[str, Any]]]:
     """
     return {}
 
+@synchronized
 def update_student_presence(room_id: str, student_name: str, cei_score: float, status: str):
     """Posts a live heartbeat update for a student in a classroom."""
     state = get_shared_state()
@@ -40,6 +53,7 @@ def update_student_presence(room_id: str, student_name: str, cei_score: float, s
         "joined_at": joined_at
     }
 
+@synchronized
 def get_live_students(room_id: str, timeout_seconds: int = 6) -> Dict[str, Dict[str, Any]]:
     """Returns students who sent a heartbeat within the last N seconds (Currently Online)."""
     state = get_shared_state()
@@ -48,10 +62,11 @@ def get_live_students(room_id: str, timeout_seconds: int = 6) -> Dict[str, Dict[
         
     now = time.time()
     return {
-        name: data for name, data in state[room_id].items()
+        name: dict(data) for name, data in state[room_id].items()
         if now - data["last_seen"] <= timeout_seconds
     }
 
+@synchronized
 def get_total_joined_students(room_id: str) -> List[Dict[str, Any]]:
     """Returns all students who have logged into this room session."""
     state = get_shared_state()

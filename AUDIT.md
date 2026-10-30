@@ -1,5 +1,7 @@
 # EduGuard Cloud Architecture & Reliability Audit Report
 
+> Historical baseline: implementation status and remaining deployment/data requirements are tracked in [REMEDIATION.md](REMEDIATION.md). The original findings below describe the audited version.
+
 **Date:** October 30, 2026  
 **Auditor:** Senior Full-Stack AI Engineer & Software Reliability Specialist  
 **Target Repository:** EduGuard Classroom Telemetry & Privacy Conference System  

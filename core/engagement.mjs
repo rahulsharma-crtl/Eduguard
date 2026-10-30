@@ -59,6 +59,7 @@ export const BEHAVIORAL_STATES = Object.freeze({
     LOOKING_AWAY: 'LOOKING_AWAY',
     LOOKING_DOWN: 'LOOKING_DOWN',
     LOOKING_UP: 'LOOKING_UP',
+    HEAD_TILT: 'HEAD_TILT',
     FACE_NOT_DETECTED: 'FACE_NOT_DETECTED',
     INSUFFICIENT_QUALITY: 'INSUFFICIENT_QUALITY'
 });
@@ -743,15 +744,17 @@ export function computeHeadPose(landmarks, thresholds = DEFAULT_CONFIG.threshold
     const yawLimit = thresholds.yawLimitDegrees ?? 25.0;
     const isAwayAngle = Math.abs(pose3D.yaw) > yawLimit;
     const isAwayRatio = (yawRatio < (thresholds.yawMin ?? 0.40) || yawRatio > (thresholds.yawMax ?? 2.30));
-    const isLookingAway = isAwayAngle || isAwayRatio;
+    const hasCalibration = Object.values(options.calibration || {}).some(value => value !== 0);
+    const useLegacyRatios = !pose3D.is3D && !hasCalibration;
+    const isLookingAway = isAwayAngle || (useLegacyRatios && isAwayRatio);
 
     const isDownAngle = pose3D.pitch < (thresholds.pitchLookingDownDegrees ?? -15.0);
     const isDownRatio = (pitchRatio > (thresholds.pitchMax ?? 2.30));
-    const isLookingDown = isDownAngle || isDownRatio;
+    const isLookingDown = isDownAngle || (useLegacyRatios && isDownRatio);
 
     const isUpAngle = pose3D.pitch > (thresholds.pitchLookingUpDegrees ?? 20.0);
     const isUpRatio = (pitchRatio < (thresholds.pitchMin ?? 0.45));
-    const isLookingUp = isUpAngle || isUpRatio;
+    const isLookingUp = isUpAngle || (useLegacyRatios && isUpRatio);
 
     return {
         yaw: pose3D.yaw,
@@ -807,6 +810,9 @@ export function classifyBehavioralState(context = {}) {
         return BEHAVIORAL_STATES.LOOKING_UP;
     }
 
+    if (Math.abs(pose.roll || 0) > (context.rollLimitDegrees ?? DEFAULT_CONFIG.thresholds.rollLimitDegrees)) {
+        return BEHAVIORAL_STATES.HEAD_TILT;
+    }
     return BEHAVIORAL_STATES.ATTENTIVE;
 }
 
@@ -910,6 +916,7 @@ export function computeAttentionProxies(landmarks, quality, options = {}, state 
         awayDurationMs,
         downDurationMs,
         upDurationMs,
+        rollLimitDegrees: thresholds.rollLimitDegrees,
         gazeDeviationDurationMs: thresholds.gazeDeviationDurationMs
     });
 
@@ -1206,6 +1213,8 @@ export class EngagementEngine {
             statusStr = "Looking Down";
         } else if (proxies.isLookingUp) {
             statusStr = "Looking Up";
+        } else if (proxies.behavioralState === BEHAVIORAL_STATES.HEAD_TILT) {
+            statusStr = "Head Tilt";
         } else {
             statusStr = "Attentive";
         }

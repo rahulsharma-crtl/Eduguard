@@ -1,0 +1,36 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
+import { classifyBehavioralState, BEHAVIORAL_STATES, estimateHeadPose, calibrateCameraOffset, EngagementEngine } from '../../core/engagement.mjs';
+import { evaluate } from '../../scripts/benchmark_video.mjs';
+test('Roll is an observable head tilt without overriding absence or eye closure', () => {
+    const context = {quality:{isValid:true}, pose:{roll:26}};
+    assert.equal(classifyBehavioralState(context), BEHAVIORAL_STATES.HEAD_TILT);
+    assert.equal(classifyBehavioralState({...context, quality:{isAbsent:true}}), BEHAVIORAL_STATES.FACE_NOT_DETECTED);
+    assert.equal(classifyBehavioralState({...context,isEyeClosed:true,closureDurationMs:1200}), BEHAVIORAL_STATES.PROLONGED_EYE_CLOSURE);
+    assert.equal(classifyBehavioralState({...context,pose:{roll:25}}), BEHAVIORAL_STATES.ATTENTIVE);
+});
+test('Generated browser engine behaves like the canonical module', () => {
+    const context = {};
+    vm.runInNewContext(readFileSync('components/student_room/frontend/engagement.js','utf8'),context);
+    assert.equal(context.EduGuardEngagement.calculateCEI(1,1,0),1);
+    assert.equal(context.EduGuardEngagement.classifyBehavioralState({quality:{isValid:true},pose:{roll:-30}}),BEHAVIORAL_STATES.HEAD_TILT);
+});
+test('Production call guard requires canvas and signaling in either initialization order', () => {
+    const html = readFileSync('components/student_room/frontend/index.html','utf8');
+    const functionText = html.match(/function areCallPrerequisitesReady\(\) \{[\s\S]*?\n        \}/)[0];
+    const context = {readinessState:{canvasStream:'idle',peerSignaling:'ready'},currentRoomId:'room',peer:{open:true,destroyed:false},virtualCanvasStream:null};
+    vm.createContext(context); vm.runInContext(functionText,context);
+    assert.equal(context.areCallPrerequisitesReady(),false);
+    context.readinessState.canvasStream='ready'; context.virtualCanvasStream={};
+    assert.equal(context.areCallPrerequisitesReady(),true);
+    context.peer.open=false;
+    assert.equal(context.areCallPrerequisitesReady(),false);
+});
+test('Real-video benchmark refuses synthetic input and reports missing class coverage', () => {
+    assert.throws(()=>evaluate({source:'synthetic'}));
+    const report = evaluate({source:'real-video',consentConfirmed:true,clips:[{frames:[{timestampMs:1,label:'FACE_NOT_DETECTED',landmarks:null}]}]});
+    assert.equal(report.accuracy,1);
+    assert.ok(report.missingClasses.includes('HEAD_TILT'));
+});

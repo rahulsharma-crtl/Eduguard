@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EduGuard Teacher Broadcast</title>
     <!-- PeerJS CDN -->
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
+    <script src="roster.js"></script>
     <style>
         :root {
             --bg-color: #0E1117;
@@ -458,21 +459,18 @@
         </div>
     </div>
 
-    <!-- WebRTC & Streamlit Bridge Script -->
+    <!-- WebRTC & Classroom Bridge Script -->
     <script>
-        // Streamlit Component Messaging Bridge
-        const Streamlit = {
-            setComponentReady: function() {
-                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
-            },
-            setFrameHeight: function(height) {
-                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: height }, "*");
-            }
+        // Classroom Component Messaging Bridge
+        const ClassroomBridge = {
+            setComponentReady() { window.parent.postMessage({type: 'eduguard:ready'}, window.location.origin); },
+            setFrameHeight(height) { window.parent.postMessage({type: 'eduguard:resize', height}, window.location.origin); },
+            setComponentValue(value) { window.parent.postMessage({type: 'eduguard:telemetry', value}, window.location.origin); }
         };
 
         function resizeIframe() {
             const h = document.getElementById("main_container").offsetHeight + 24;
-            Streamlit.setFrameHeight(Math.max(h, 580));
+            ClassroomBridge.setFrameHeight(Math.max(h, 580));
         }
 
         new ResizeObserver(resizeIframe).observe(document.getElementById("main_container"));
@@ -488,6 +486,7 @@
         let cameraInitPromise = null;
         let peer = null;
         let currentRoomId = null;
+        let signalingOptions = null;
         let connectedStudents = new Map(); // peerId -> { call, stream, element, audioElem, badge, studentName, joinTime, lastSeen }
 
         let teacherPeerRetryCount = 0;
@@ -599,7 +598,12 @@
             teacherReadiness.signaling = 'connecting';
             setStatus("connecting", "Registering WebRTC Peer...");
 
+            if (!signalingOptions?.host) {
+                setStatus("error", "Private signaling server is not configured.");
+                return;
+            }
             peer = new Peer(teacherPeerId, {
+                ...signalingOptions,
                 debug: 1,
                 config: {
                     iceServers: [
@@ -746,8 +750,7 @@
             const row = document.createElement("tr");
             row.id = `roster_${peerId}`;
 
-            let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
-            displayName = displayName.replace(/-[0-9]+$/, "") || "Student";
+            const displayName = EduGuardRoster.displayName(currentRoomId, peerId, call?.metadata);
             const safeDisplayName = escapeHtml(displayName);
 
             const joinTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -903,11 +906,7 @@
         setInterval(() => {
             const now = Date.now();
             for (const [peerId, student] of connectedStudents.entries()) {
-                const pc = student.call && student.call.peerConnection;
-                const isCallLive = pc && (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected');
-                if (isCallLive) {
-                    student.lastSeen = now;
-                } else if (student.lastSeen && (now - student.lastSeen > 12000)) {
+                if (EduGuardRoster.shouldPrune(student, now)) {
                     console.log(`Pruning inactive student peer (heartbeat timeout): ${peerId}`);
                     removeStudentRoster(peerId);
                 }
@@ -978,15 +977,21 @@
             }
         });
 
-        // 5. Streamlit Render Event Listener
+        // 5. Classroom Render Event Listener
         window.addEventListener("message", (event) => {
-            if (event.data && event.data.type === "streamlit:render") {
+            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            if (event.data?.type === 'eduguard:stop') {
+                cleanupTeacherSession();
+                return;
+            }
+            if (event.data && event.data.type === "eduguard:init") {
                 const args = event.data.args;
+                if (args) signalingOptions = args.signaling;
                 if (args && args.roomId && args.roomId !== currentRoomId) {
                     currentRoomId = args.roomId;
-                    initPeerRoom(currentRoomId);
+                    initCamera().then(() => initPeerRoom(currentRoomId)).catch(() => {});
                 }
-                // Optional fallback: Sync telemetry badges from Streamlit liveStudents argument
+                // Optional fallback: Sync telemetry badges from Classroom liveStudents argument
                 if (args && args.liveStudents && typeof args.liveStudents === "object") {
                     for (const [sName, sData] of Object.entries(args.liveStudents)) {
                         updateStudentTelemetryBadge(sName, {
@@ -1000,11 +1005,8 @@
             }
         });
 
-        // Kick off Camera & Streamlit handshake
-        initCamera().finally(() => {
-            Streamlit.setComponentReady();
-            resizeIframe();
-        });
+        ClassroomBridge.setComponentReady();
+        resizeIframe();
     </script>
 </body>
 </html>

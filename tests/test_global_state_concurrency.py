@@ -3,12 +3,7 @@ from core import global_state
 
 
 def test_global_state_concurrency_race_condition():
-    """
-    VERIFIED DEFECT:
-    core/global_state.py lacks threading locks.
-    Concurrent updates from multiple student threads while reading live students
-    triggers RuntimeError: dictionary changed size during iteration.
-    """
+    """Concurrent room updates and snapshots must finish without iteration errors."""
     state = global_state.get_shared_state()
     state.clear()
     errors = []
@@ -40,7 +35,11 @@ def test_global_state_concurrency_race_condition():
     for t in writers + readers:
         t.join()
 
-    # The test confirms that without synchronization, dictionary mutation during iteration occurs
-    assert len(errors) > 0 or not stop_event.is_set(), (
-        "Concurrency race condition test completed. Check whether errors were caught."
-    )
+    assert errors == [], f"Concurrent reads failed: {errors}"
+
+
+def test_live_student_snapshot_does_not_mutate_shared_state():
+    global_state.update_student_presence("copies", "Alice", 1.0, "Attentive")
+    snapshot = global_state.get_live_students("copies")
+    snapshot["Alice"]["status"] = "modified"
+    assert global_state.get_live_students("copies")["Alice"]["status"] == "Attentive"

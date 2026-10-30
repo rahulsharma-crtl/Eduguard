@@ -6,12 +6,12 @@
     <title>EduGuard Student Privacy Conference</title>
 
     <!-- PeerJS WebRTC Library -->
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
 
     <!-- MediaPipe Vision CDNs -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" integrity="sha384-q1KhAZhJcJXr3zfC3Tz07pBqQSabwFIZhXlmlUAB8s0zk4ETWERkIKGBCFQ5Jc3e" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" integrity="sha384-W/7NVG2tfN12ld8faSFVOZ/W4UHFHze98GqEUPTl8EjY9QDwCKQIzoCHp8/IlIIr" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" integrity="sha384-nKiz5QrpRlMQLw5nrZcprT7N9vmmAcIgV8TuGuep4x91V4JIPsXa+D44Wxj0guoa" crossorigin="anonymous"></script>
 
     <!-- Standalone EduGuard Engagement Engine -->
     <script src="engagement.js"></script>
@@ -420,7 +420,7 @@
                     <canvas id="privacy_canvas" width="640" height="480"></canvas>
 
                     <div class="privacy-pill">
-                        <span>🔒</span> Zero Raw Video Transmitted
+                        <span>🔒</span> Zero Raw Video Transmitted; live microphone audio is shared while unmuted
                     </div>
                     <div class="feed-overlay">
                         <span id="kinematics_tag">🧑‍🎓 Privacy Mesh Active</span>
@@ -465,22 +465,16 @@
     </div>
 
     <script>
-        // --- 1. Streamlit Bridge Messaging Protocol ---
-        const Streamlit = {
-            setComponentReady: function() {
-                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
-            },
-            setFrameHeight: function(height) {
-                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: height }, "*");
-            },
-            setComponentValue: function(value) {
-                window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value }, "*");
-            }
+        // --- 1. Classroom Bridge Messaging Protocol ---
+        const ClassroomBridge = {
+            setComponentReady() { window.parent.postMessage({type: 'eduguard:ready'}, window.location.origin); },
+            setFrameHeight(height) { window.parent.postMessage({type: 'eduguard:resize', height}, window.location.origin); },
+            setComponentValue(value) { window.parent.postMessage({type: 'eduguard:telemetry', value}, window.location.origin); }
         };
 
         function resizeIframe() {
             const h = document.getElementById("main_container").offsetHeight + 24;
-            Streamlit.setFrameHeight(Math.max(h, 540));
+            ClassroomBridge.setFrameHeight(Math.max(h, 540));
         }
 
         new ResizeObserver(resizeIframe).observe(document.getElementById("main_container"));
@@ -515,6 +509,7 @@
         let isLecturerAudioSilenced = false;
         let localUserMedia = null;
         let virtualCanvasStream = null;
+        let signalingOptions = null;
         let peer = null;
         let activeCall = null;
         let currentRoomId = null;
@@ -768,12 +763,13 @@
                 kinematicsTag.innerText += " (🔇 Lecture Muted)";
             }
 
-            // Dispatch to Streamlit & Teacher once every ~2.5s (reduces WebSocket event volume)
+            // Dispatch to Classroom & Teacher once every ~2.5s (reduces WebSocket event volume)
             const now = Date.now();
             if (now - lastDispatchTime > 2500) {
                 lastDispatchTime = now;
                 const telemetryPayload = {
                     type: "telemetry",
+                    sample_id: crypto.randomUUID(),
                     peerId: peer ? peer.id : null,
                     studentName: currentStudentName,
                     cei_score: frameAnalysis.cei_score,
@@ -800,8 +796,8 @@
                     behavioral_state: frameAnalysis.behavioral_state || null
                 };
 
-                // 1. Dispatch to Streamlit for SQLite session database logging
-                Streamlit.setComponentValue(telemetryPayload);
+                // 1. Dispatch to Classroom for SQLite session database logging
+                ClassroomBridge.setComponentValue(telemetryPayload);
 
                 // 2. Direct P2P WebRTC DataChannel to Teacher for instant live floating badge overlay
                 const isDataChannelReady = telemetryDataChannel && (telemetryDataChannel.open || telemetryDataChannel.readyState === "open");
@@ -910,7 +906,7 @@
                     // Initialize MediaPipe FaceMesh
                     readinessState.faceMesh = 'loading';
                     const faceMesh = new FaceMesh({
-                        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+                        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`
                     });
 
                     faceMesh.setOptions({
@@ -923,6 +919,20 @@
                     faceMesh.onResults((results) => {
                         if (readinessState.faceMesh !== 'ready') {
                             readinessState.faceMesh = 'ready';
+                        }
+                        if (calibrationSamples && results.multiFaceLandmarks?.length === 1 && engagementEngine) {
+                            const landmarks = results.multiFaceLandmarks[0];
+                            const quality = EduGuardEngagement.assessFacePresenceQuality(landmarks);
+                            if (quality.isValid) {
+                                calibrationSamples.push(EduGuardEngagement.estimateHeadPose(landmarks));
+                                if (calibrationSamples.length >= 30) {
+                                    const offsets = EduGuardEngagement.calibrateCameraOffset(calibrationSamples);
+                                    engagementEngine.setCameraCalibration(offsets);
+                                    engagementEngine.reset();
+                                    calibrationSamples = null;
+                                    calibrationButton.textContent = 'Camera calibrated (click to recalibrate)';
+                                }
+                            }
                         }
                         onFaceMeshResults(results);
                     });
@@ -965,7 +975,7 @@
             cleanupPeer();
 
             currentRoomId = cleanRoom;
-            currentStudentName = cleanName;
+            currentStudentName = studentName;
             const studentPeerId = `${cleanRoom}-student-${cleanName}-${Math.floor(Math.random() * 10000)}`;
             const teacherPeerId = `${cleanRoom}-teacher`;
 
@@ -974,7 +984,12 @@
             readinessState.peerSignaling = 'connecting';
             updateOverallStatus();
 
+            if (!signalingOptions?.host) {
+                setConnectionStatus("alert", "Private signaling server is not configured.");
+                return;
+            }
             peer = new Peer(studentPeerId, {
+                ...signalingOptions,
                 debug: 1,
                 config: {
                     iceServers: [
@@ -1125,7 +1140,7 @@
             console.log(`Initiating outbound WebRTC call to teacher: ${teacherPeerId}`);
 
             try {
-                activeCall = peer.call(teacherPeerId, virtualCanvasStream);
+                activeCall = peer.call(teacherPeerId, virtualCanvasStream, { metadata: { studentName: currentStudentName } });
             } catch (err) {
                 console.warn("PeerJS call initiation failed:", err);
                 readinessState.teacherStream = 'error';
@@ -1330,14 +1345,31 @@
             }
         });
 
-        // --- 7. Streamlit Render Event Listener ---
+        // Neutral pose calibration is explicit and local to this tab.
+        let calibrationSamples = null;
+        const calibrationButton = document.createElement('button');
+        calibrationButton.className = 'ctrl-btn';
+        calibrationButton.textContent = 'Calibrate camera (look straight ahead)';
+        privacyCanvas.parentElement.appendChild(calibrationButton);
+        calibrationButton.addEventListener('click', () => {
+            calibrationSamples = [];
+            calibrationButton.textContent = 'Hold a neutral pose: collecting 30 frames...';
+        });
+
+        // --- 7. Classroom Render Event Listener ---
         window.addEventListener("message", (event) => {
-            if (event.data && event.data.type === "streamlit:render") {
+            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            if (event.data?.type === 'eduguard:stop') {
+                cleanupAll();
+                return;
+            }
+            if (event.data && event.data.type === "eduguard:init") {
                 const args = event.data.args;
                 if (args && args.roomId) {
+                    signalingOptions = args.signaling;
                     currentRoomId = args.roomId;
                     currentStudentName = args.studentName || "Student";
-                    initStudentPeer(currentRoomId, currentStudentName);
+                    initLocalStream().then(() => initStudentPeer(currentRoomId, currentStudentName)).catch(() => {});
                 }
                 resizeIframe();
             }
@@ -1353,11 +1385,9 @@
             cleanupAll();
         });
 
-        // Initialize Local Hardware & Handshake
-        initLocalStream().finally(() => {
-            Streamlit.setComponentReady();
-            resizeIframe();
-        });
+        // Wait for the parent classroom to provide configuration before capturing media.
+        ClassroomBridge.setComponentReady();
+        resizeIframe();
     </script>
 </body>
 </html>

@@ -4,7 +4,8 @@ const path = require('path');
 
 const files = [
     'components/student_room/frontend/index.html',
-    'components/teacher_room/frontend/index.html'
+    'components/teacher_room/frontend/index.html',
+    'benchmarks/capture.html'
 ];
 
 let hasErrors = false;

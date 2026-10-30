@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: eduguard-signaling
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node signaling/server.cjs
+    healthCheckPath: /eduguard/peerjs/id
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_VERSION
+        value: "24.11.0"
+      - key: TRUST_PROXY
+        value: "true"
+  - type: web
+    name: eduguard-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: AUTH_SIGNING_KEY
+        generateValue: true
+      - key: TEACHER_ADMIN_PASSWORD
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: SIGNALING_URL
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eduguard-db
+          property: connectionString
+# Free Render databases expire after 30 days. Upgrade or use another PostgreSQL
+# provider for long-term retention; no paid resources are selected here.
+databases:
+  - name: eduguard-db
+    plan: free
+    databaseName: eduguard
+    user: eduguard

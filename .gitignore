@@ -27,3 +27,18 @@ models/
 logs/
 reports/*.csv
 *.csv
+
+node_modules/
+benchmarks/private/
+
+# Generated Streamlit Cloud credentials
+deployment/streamlit-cloud-secrets.toml
+
+# Generated frontend / local API files
+dist/
+web/public/classroom/
+.venv/
+.pytest_cache/
+
+!.env.example
+!web/.env.example

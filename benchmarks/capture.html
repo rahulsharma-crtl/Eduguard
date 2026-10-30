@@ -1,0 +1,44 @@
+<!doctype html><meta charset="utf-8"><title>EduGuard real-video landmark capture</title>
+<h1>Real-video landmark capture</h1><p>Video stays in this browser. Only derived landmarks are exported. Review labels independently of predictions.</p>
+<label><input id="consent" type="checkbox">I have consent to process and label this video</label><p><input id="file" type="file" accept="video/*"></p>
+<p>Label intervals in milliseconds (end exclusive). Include every sampled frame; use engine state names.</p>
+<textarea id="labels" rows="6" cols="90">[{"startMs":0,"endMs":1000,"label":"ATTENTIVE"}]</textarea>
+<p><button id="run">Extract labeled landmarks</button><span id="status"></span></p><video id="video" controls width="640"></video>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" integrity="sha384-nKiz5QrpRlMQLw5nrZcprT7N9vmmAcIgV8TuGuep4x91V4JIPsXa+D44Wxj0guoa" crossorigin="anonymous"></script>
+<script src="../components/student_room/frontend/engagement.js"></script>
+<script>
+const el = id => document.getElementById(id);
+el('run').onclick = async () => {
+    let url, mesh;
+    el('run').disabled = true;
+    try {
+        if (!el('consent').checked || !el('file').files[0]) throw Error('Select a consented video first.');
+        const intervals = JSON.parse(el('labels').value);
+        const classes = Object.values(EduGuardEngagement.BEHAVIORAL_STATES);
+        if (!Array.isArray(intervals) || !intervals.length || intervals.some(x => !Number.isFinite(x.startMs) || !Number.isFinite(x.endMs) || x.startMs < 0 || x.endMs <= x.startMs || !classes.includes(x.label))) throw Error('Invalid label intervals.');
+        const video = el('video');
+        url = URL.createObjectURL(el('file').files[0]);
+        await new Promise((resolve,reject) => {video.onloadedmetadata=resolve; video.onerror=reject; video.src=url;});
+        if (!Number.isFinite(video.duration)) throw Error('Video duration unavailable.');
+        mesh = new FaceMesh({locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`});
+        mesh.setOptions({maxNumFaces:1, refineLandmarks:true, minDetectionConfidence:0.5, minTrackingConfidence:0.5});
+        let landmarks = null;
+        mesh.onResults(result => { landmarks = result.multiFaceLandmarks?.[0] || null; });
+        const frames=[];
+        // Fixed 10 Hz sampling: sequential seeks preserve timestamps independently of processing speed.
+        for (let timestampMs=1; timestampMs < video.duration*1000; timestampMs+=100) {
+            const matches = intervals.filter(x => x.startMs <= timestampMs && timestampMs < x.endMs);
+            if (matches.length !== 1) throw Error(`Exactly one label required at ${timestampMs}ms`);
+            await new Promise((resolve,reject) => {video.onseeked=resolve; video.onerror=reject; video.currentTime=timestampMs/1000;});
+            await mesh.send({image:video});
+            frames.push({timestampMs,label:matches[0].label,landmarks});
+            el('status').textContent=` ${frames.length} frames extracted`;
+        }
+        const dataset={source:'real-video',consentConfirmed:true,clips:[{id:el('file').files[0].name,frames}]};
+        const download=URL.createObjectURL(new Blob([JSON.stringify(dataset)],{type:'application/json'}));
+        const a=document.createElement('a'); a.href=download; a.download='real-video-landmarks.json'; a.click();
+        setTimeout(()=>URL.revokeObjectURL(download),1000);
+    } catch(error) {el('status').textContent=error.message;}
+    finally {if(mesh) await mesh.close(); if(url) URL.revokeObjectURL(url); el('run').disabled=false;}
+};
+</script>

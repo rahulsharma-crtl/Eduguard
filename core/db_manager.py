@@ -7,6 +7,7 @@ Stores multi-room session metadata and telemetry for post-lecture analysis.
 """
 
 import sqlite3
+from contextlib import contextmanager
 import os
 import logging
 from typing import List, Dict, Any, Optional
@@ -25,11 +26,16 @@ class DatabaseManager:
         self.db_path = os.path.join(os.path.dirname(__file__), "..", db_path)
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self):
         conn = sqlite3.connect(self.db_path, timeout=20.0, check_same_thread=False)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         query_sessions = '''
@@ -58,6 +64,14 @@ class DatabaseManager:
             with self._get_connection() as conn:
                 conn.execute(query_sessions)
                 conn.execute(query_telemetry)
+                if "last_seen" not in {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}:
+                    conn.execute("ALTER TABLE sessions ADD COLUMN last_seen REAL")
+                    conn.execute("UPDATE sessions SET last_seen = COALESCE((SELECT MAX(timestamp) FROM telemetry WHERE telemetry.session_id = sessions.session_id), start_time)")
+                if "sample_id" not in {row[1] for row in conn.execute("PRAGMA table_info(telemetry)")}:
+                    conn.execute("ALTER TABLE telemetry ADD COLUMN sample_id TEXT")
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_sample_id ON telemetry(session_id, sample_id) WHERE sample_id IS NOT NULL")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_room_id ON sessions(room_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_session_id ON telemetry(session_id)")
                 conn.commit()
             logging.info("SQLite Database initialized successfully.")
         except Exception as e:
@@ -68,8 +82,8 @@ class DatabaseManager:
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute(
-                    "INSERT INTO sessions (room_id, student_name, start_time) VALUES (?, ?, ?)",
-                    (room_id, student_name, start_time)
+                    "INSERT INTO sessions (room_id, student_name, start_time, last_seen) VALUES (?, ?, ?, ?)",
+                    (room_id, student_name, start_time, start_time)
                 )
                 conn.commit()
                 return cursor.lastrowid
@@ -91,19 +105,44 @@ class DatabaseManager:
             return
             
         data = [
-            (session_id, r["timestamp"], r["cei"], r["attentiveness"], r["distraction"], r["status"])
+            (session_id, r["timestamp"], r["cei"], r["attentiveness"], r["distraction"], r["status"], r.get("sample_id"))
             for r in records
         ]
         
         try:
             with self._get_connection() as conn:
                 conn.executemany('''
-                    INSERT INTO telemetry (session_id, timestamp, cei, attentiveness, distraction, status)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO telemetry (session_id, timestamp, cei, attentiveness, distraction, status, sample_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', data)
+                conn.execute("UPDATE sessions SET last_seen = ?, end_time = NULL, avg_cei = NULL WHERE session_id = ?", (max(r["timestamp"] for r in records), session_id))
                 conn.commit()
         except Exception as e:
             logging.error(f"Failed to insert telemetry batch: {e}")
+            raise
+
+    def touch_session(self, session_id: int) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET last_seen = ?, end_time = NULL, avg_cei = NULL WHERE session_id = ?", (time.time(), session_id))
+
+    def finalize_session(self, session_id: int) -> None:
+        """Close using persisted telemetry, including its full-session mean."""
+        with self._get_connection() as conn:
+            conn.execute("""UPDATE sessions SET end_time = COALESCE(
+                (SELECT MAX(timestamp) FROM telemetry WHERE session_id = ?), start_time),
+                avg_cei = (SELECT AVG(cei) FROM telemetry WHERE session_id = ?)
+                WHERE session_id = ?""", (session_id, session_id, session_id))
+
+    def close_stale_sessions(self, timeout_seconds: float = 30.0) -> None:
+        """Recover abandoned sessions after telemetry heartbeats stop."""
+        with self._get_connection() as conn:
+            conn.execute("""UPDATE sessions SET
+                end_time = COALESCE((SELECT MAX(timestamp) FROM telemetry
+                                    WHERE telemetry.session_id = sessions.session_id), start_time),
+                avg_cei = (SELECT AVG(cei) FROM telemetry
+                           WHERE telemetry.session_id = sessions.session_id)
+                WHERE end_time IS NULL AND COALESCE(last_seen, start_time) < ?""",
+                (time.time() - timeout_seconds,))
 
     def get_all_sessions(self, room_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Retrieves history of recorded sessions, optionally filtered by room_id."""
@@ -198,7 +237,7 @@ class DatabaseManager:
                     if stats["ceis"]:
                         avg_cei = sum(stats["ceis"]) / len(stats["ceis"])
                     else:
-                        avg_cei = 1.0
+                        avg_cei = 0.0
 
                     avg_cei_pct = round(avg_cei * 100, 1)
 
@@ -206,9 +245,9 @@ class DatabaseManager:
                     statuses = stats["statuses"]
                     total_statuses = len(statuses)
                     if total_statuses > 0:
-                        evasion_count = sum(1 for s in statuses if ("audio evasion" in s.lower() or "muted" in s.lower()))
+                        evasion_count = sum(1 for s in statuses if ("audio evasion" in s.lower() or s.lower() == "lecture_audio_muted"))
                         drowsy_count = sum(1 for s in statuses if "drowsy" in s.lower())
-                        distract_count = sum(1 for s in statuses if ("looking" in s.lower() or "distract" in s.lower() or "away" in s.lower()))
+                        distract_count = sum(1 for s in statuses if ("looking away" in s.lower() or "distract" in s.lower()))
                         absent_count = sum(1 for s in statuses if "absent" in s.lower())
 
                         evasion_pct = evasion_count / total_statuses
@@ -231,7 +270,7 @@ class DatabaseManager:
                         else:
                             primary_state = "Low Engagement"
                     else:
-                        primary_state = "Mainly Attentive" if avg_cei_pct >= 80.0 else "Moderate Attention"
+                        primary_state = "No Telemetry Recorded"
 
                     minutes = int(duration // 60)
                     seconds = int(duration % 60)

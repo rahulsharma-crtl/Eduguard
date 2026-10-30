@@ -1,14 +1,30 @@
 {
   "name": "eduguard-classroom",
   "version": "1.0.0",
-  "description": "EduGuard Cloud Privacy Analytics & Classroom Telemetry",
+  "description": "EduGuard privacy classroom \u2014 React/Vite, FastAPI and WebRTC",
   "scripts": {
     "test:js": "node --test tests/js/*.test.mjs",
-    "test:py": "pytest -v",
+    "test:py": "python -m pytest -q",
     "test": "npm run test:js && npm run test:py",
     "lint:js": "node scripts/lint_frontend.js",
     "lint:py": "flake8 core/ config.py tests/ --statistics",
-    "lint": "npm run lint:js && npm run lint:py"
+    "lint": "npm run lint:js && npm run lint:py",
+    "build:engagement": "node scripts/build_engagement.mjs",
+    "check:engagement": "node scripts/build_engagement.mjs --check",
+    "start:signaling": "node signaling/server.cjs",
+    "benchmark:video": "node scripts/benchmark_video.mjs",
+    "pretest:js": "npm run check:engagement",
+    "dev": "node scripts/prepare_web.mjs && vite",
+    "build": "npm run build:engagement && node scripts/prepare_web.mjs && vite build",
+    "preview": "vite preview --host 127.0.0.1"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "vite": "8.3.5"
+  },
+  "dependencies": {
+    "peer": "1.0.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
 }
