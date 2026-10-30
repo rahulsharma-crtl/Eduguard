@@ -407,7 +407,7 @@
             <div class="teacher-pod">
                 <div class="pod-title">
                     <span>📡 Teacher Live Feed</span>
-                    <span style="color: var(--success-color); font-size: 0.75rem;">1080p HD Broadcast</span>
+                    <span id="broadcast_quality_badge" style="color: var(--success-color); font-size: 0.75rem;">Initializing Feed...</span>
                 </div>
                 <div class="video-wrapper">
                     <!-- Local video is muted to prevent self-echo -->
@@ -477,11 +477,22 @@
 
         new ResizeObserver(resizeIframe).observe(document.getElementById("main_container"));
 
-        // State Variables
+        // State Variables & Readiness States
+        const teacherReadiness = {
+            webcam: 'idle',       // 'idle' | 'requesting' | 'ready' | 'error'
+            signaling: 'idle'     // 'idle' | 'connecting' | 'ready' | 'error'
+        };
+        window.__eduguard_teacher_readiness = teacherReadiness;
+
         let localStream = null;
+        let cameraInitPromise = null;
         let peer = null;
         let currentRoomId = null;
-        let connectedStudents = new Map(); // peerId -> { call, stream, element, badge }
+        let connectedStudents = new Map(); // peerId -> { call, stream, element, audioElem, badge, studentName, joinTime, lastSeen }
+
+        let teacherPeerRetryCount = 0;
+        let teacherPeerRetryTimer = null;
+        const MaxTeacherPeerRetries = 5;
 
         const teacherVideo = document.getElementById("teacher_video");
         const statusBadge = document.getElementById("status_badge");
@@ -491,6 +502,7 @@
         const rosterTbody = document.getElementById("roster_tbody");
         const emptyRosterRow = document.getElementById("empty_roster_row");
         const studentsCountBadge = document.getElementById("students_count_badge");
+        const broadcastQualityBadge = document.getElementById("broadcast_quality_badge");
 
         const toggleMicBtn = document.getElementById("toggle_mic_btn");
         const toggleCamBtn = document.getElementById("toggle_cam_btn");
@@ -502,33 +514,89 @@
             statusText.innerText = msg;
         }
 
+        // Measure and display accurate hardware broadcast resolution
+        function updateBroadcastResolutionBadge(stream) {
+            if (!broadcastQualityBadge) return;
+            if (!stream) {
+                broadcastQualityBadge.innerText = "Feed Offline";
+                broadcastQualityBadge.style.color = "var(--warn-color)";
+                return;
+            }
+            const videoTracks = stream.getVideoTracks ? stream.getVideoTracks() : [];
+            if (videoTracks.length === 0) {
+                broadcastQualityBadge.innerText = "Audio Only Broadcast";
+                broadcastQualityBadge.style.color = "var(--warn-color)";
+                return;
+            }
+            const videoTrack = videoTracks[0];
+            const settings = (videoTrack.getSettings && videoTrack.getSettings()) || {};
+            const w = settings.width || teacherVideo.videoWidth || 0;
+            const h = settings.height || teacherVideo.videoHeight || 0;
+
+            if (h >= 1080 || w >= 1920) {
+                broadcastQualityBadge.innerText = "1080p Full HD Broadcast";
+                broadcastQualityBadge.style.color = "var(--success-color)";
+            } else if (h >= 720 || w >= 1280) {
+                broadcastQualityBadge.innerText = "720p HD Broadcast";
+                broadcastQualityBadge.style.color = "var(--success-color)";
+            } else if (h > 0) {
+                broadcastQualityBadge.innerText = `${h}p Broadcast`;
+                broadcastQualityBadge.style.color = "var(--warn-color)";
+            } else {
+                broadcastQualityBadge.innerText = "Live Broadcast";
+                broadcastQualityBadge.style.color = "var(--success-color)";
+            }
+        }
+
+        if (teacherVideo) {
+            teacherVideo.addEventListener("loadedmetadata", () => {
+                updateBroadcastResolutionBadge(localStream);
+            });
+        }
+
         // 1. Capture Local Hardware Stream (Webcam & Microphone)
         async function initCamera() {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-                    audio: true
-                });
-                teacherVideo.srcObject = localStream;
-                console.log("Local camera and mic stream captured successfully.");
-            } catch (err) {
-                console.error("Camera access error:", err);
-                setStatus("error", "Camera/Mic Permission Blocked");
-            }
+            teacherReadiness.webcam = 'requesting';
+            setStatus("connecting", "Requesting Camera & Mic Access...");
+
+            cameraInitPromise = (async () => {
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                        audio: true
+                    });
+                    teacherVideo.srcObject = localStream;
+                    teacherReadiness.webcam = 'ready';
+                    updateBroadcastResolutionBadge(localStream);
+                    console.log("Local camera and mic stream captured successfully.");
+                    return localStream;
+                } catch (err) {
+                    console.error("Camera access error:", err);
+                    teacherReadiness.webcam = 'error';
+                    setStatus("error", "Camera/Mic Permission Blocked");
+                    updateBroadcastResolutionBadge(null);
+                    throw err;
+                }
+            })();
+
+            return cameraInitPromise;
         }
 
         // 2. Initialize PeerJS WebRTC Room Host
         function initPeerRoom(roomId) {
-            if (peer && !peer.destroyed) {
-                return; // Already initialized for this room
-            }
-
-            // Sanitize roomId for standard PeerJS ID requirements
             const cleanRoom = roomId.replace(/[^a-zA-Z0-9_-]/g, "");
             const teacherPeerId = `${cleanRoom}-teacher`;
 
+            if (peer && !peer.destroyed && currentRoomId === cleanRoom) {
+                return; // Already initialized for this room
+            }
+
+            cleanupTeacherPeer();
+
+            currentRoomId = cleanRoom;
             roomBadge.innerText = `Classroom: ${cleanRoom}`;
             peerIdLabel.innerText = `Peer ID: ${teacherPeerId}`;
+            teacherReadiness.signaling = 'connecting';
             setStatus("connecting", "Registering WebRTC Peer...");
 
             peer = new Peer(teacherPeerId, {
@@ -544,28 +612,78 @@
 
             peer.on("open", (id) => {
                 console.log(`Teacher Peer registered successfully with ID: ${id}`);
+                teacherReadiness.signaling = 'ready';
+                teacherPeerRetryCount = 0;
+                if (teacherPeerRetryTimer) {
+                    clearTimeout(teacherPeerRetryTimer);
+                    teacherPeerRetryTimer = null;
+                }
                 setStatus("broadcasting", "Live Broadcasting Active");
             });
 
             peer.on("error", (err) => {
                 console.error("PeerJS error:", err);
                 if (err.type === "unavailable-id") {
-                    setStatus("connecting", "Reconnecting Peer ID...");
-                    setTimeout(() => initPeerRoom(roomId), 2000);
+                    if (teacherPeerRetryCount < MaxTeacherPeerRetries) {
+                        teacherPeerRetryCount++;
+                        const delay = Math.min(Math.round(1500 * Math.pow(1.5, teacherPeerRetryCount - 1)), 10000);
+                        setStatus("connecting", `Reclaiming Peer ID in ${Math.round(delay/1000)}s (${teacherPeerRetryCount}/${MaxTeacherPeerRetries})...`);
+                        teacherPeerRetryTimer = setTimeout(() => {
+                            teacherPeerRetryTimer = null;
+                            if (peer && !peer.destroyed) {
+                                try { peer.destroy(); } catch (_) {}
+                                peer = null;
+                            }
+                            initPeerRoom(roomId);
+                        }, delay);
+                    } else {
+                        teacherReadiness.signaling = 'error';
+                        setStatus("error", "Teacher Peer ID conflict. Check other active tabs.");
+                    }
                 } else {
+                    teacherReadiness.signaling = 'error';
                     setStatus("error", `WebRTC: ${err.type || "Connection Error"}`);
                 }
+            });
+
+            peer.on("disconnected", () => {
+                console.warn("Teacher Peer disconnected from signaling server.");
+                teacherReadiness.signaling = 'connecting';
+                if (peer && !peer.destroyed) {
+                    try { peer.reconnect(); } catch (_) {}
+                }
+            });
+
+            peer.on("close", () => {
+                teacherReadiness.signaling = 'idle';
+                cleanupTeacherPeer();
             });
 
             // 3. Listen for Incoming Student Calls & Answer with Teacher Broadcast Stream
             peer.on("call", (call) => {
                 console.log(`Incoming call from student peer: ${call.peer}`);
-                
-                // Answer call by transmitting teacher's local audio/video stream
+
+                const answerCall = (stream) => {
+                    try {
+                        if (stream) {
+                            call.answer(stream);
+                        } else {
+                            call.answer();
+                        }
+                    } catch (e) {
+                        console.warn("Error answering student call:", e);
+                    }
+                };
+
+                // Answer call with localStream; if camera is still requesting, wait for it
                 if (localStream) {
-                    call.answer(localStream);
+                    answerCall(localStream);
+                } else if (cameraInitPromise) {
+                    cameraInitPromise
+                        .then((s) => answerCall(s))
+                        .catch(() => answerCall(null));
                 } else {
-                    call.answer();
+                    answerCall(null);
                 }
 
                 // Handle student's incoming media stream (Zero Video Decoding - Audio Only)
@@ -628,22 +746,13 @@
             const row = document.createElement("tr");
             row.id = `roster_${peerId}`;
 
-            // Optional hidden audio element so teacher can hear unmuted student audio
-            if (stream && stream.getAudioTracks && stream.getAudioTracks().length > 0) {
-                const audioElem = document.createElement("audio");
-                audioElem.autoplay = true;
-                audioElem.playsInline = true;
-                audioElem.srcObject = stream;
-                audioElem.style.display = "none";
-                row.appendChild(audioElem);
-            }
-
             let displayName = peerId.replace(`${currentRoomId}-`, "").replace("student-", "");
-            displayName = displayName.replace(/-[0-9]{3,5}$/, "") || "Student";
+            displayName = displayName.replace(/-[0-9]+$/, "") || "Student";
             const safeDisplayName = escapeHtml(displayName);
 
             const joinTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+            // Set row HTML first to prevent deleting subsequently appended elements
             row.innerHTML = `
                 <td>
                     <div class="student-name-cell">
@@ -664,10 +773,41 @@
                 </td>
             `;
 
+            // Attach hidden audio element AFTER row.innerHTML is assigned so it is not deleted
+            let audioElem = null;
+            if (stream) {
+                audioElem = document.createElement("audio");
+                audioElem.autoplay = true;
+                audioElem.playsInline = true;
+                audioElem.srcObject = stream;
+                audioElem.style.display = "none";
+                row.appendChild(audioElem);
+                audioElem.play().catch((e) => console.warn("Student audio autoplay prevented:", e));
+
+                // Handle audio tracks added or renegotiated later
+                if (stream.onaddtrack !== undefined) {
+                    stream.onaddtrack = () => {
+                        if (audioElem) {
+                            audioElem.srcObject = stream;
+                            audioElem.play().catch((e) => console.warn("Student audio play notice:", e));
+                        }
+                    };
+                }
+            }
+
             rosterTbody.appendChild(row);
             const badge = row.querySelector(`#badge-${peerId}`);
 
-            connectedStudents.set(peerId, { call, stream, element: row, badge, studentName: displayName, joinTime, lastSeen: Date.now() });
+            connectedStudents.set(peerId, {
+                call,
+                stream,
+                element: row,
+                audioElem,
+                badge,
+                studentName: displayName,
+                joinTime,
+                lastSeen: Date.now()
+            });
             updateStudentCount();
             resizeIframe();
         }
@@ -675,6 +815,15 @@
         function removeStudentRoster(peerId) {
             if (connectedStudents.has(peerId)) {
                 const item = connectedStudents.get(peerId);
+                if (item.audioElem) {
+                    try {
+                        item.audioElem.pause();
+                        item.audioElem.srcObject = null;
+                    } catch (_) {}
+                }
+                if (item.call) {
+                    try { item.call.close(); } catch (_) {}
+                }
                 if (item.element && item.element.parentNode) {
                     item.element.parentNode.removeChild(item.element);
                 }
@@ -710,22 +859,34 @@
                 connectedStudents.get(matchedPeerId).lastSeen = Date.now();
             }
 
-            const ceiRaw = (data.cei !== undefined) ? data.cei : (data.cei_score !== undefined ? data.cei_score : 1.0);
-            const ceiPct = Math.round(ceiRaw * 100);
             const statusText = data.status || "Attentive";
-            const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
-            const isDistracted = data.isLookingAway || data.is_looking_away || data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("looking") || statusText.toLowerCase().includes("distract");
-            const isAudioEvasion = data.audio_evasion || data.is_lecturer_audio_muted || statusText.toLowerCase().includes("speaking") || statusText.toLowerCase().includes("evasion") || statusText.toLowerCase().includes("muted");
+            const safeStatus = escapeHtml(statusText);
+            const isUnknown = Boolean(data.is_unknown) || statusText.toLowerCase().includes("insufficient") || statusText.toLowerCase().includes("unknown");
 
             badge.classList.remove("badge-attentive", "badge-warning", "badge-alert");
-            const safeStatus = escapeHtml(statusText);
 
-            if (isAudioEvasion || isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
+            if (isUnknown) {
+                badge.classList.add("badge-warning");
+                badge.innerHTML = `<span>🔍 --% | ${safeStatus}</span>`;
+                return;
+            }
+
+            const ceiRaw = (data.cei !== undefined) ? data.cei : (data.cei_score !== undefined ? data.cei_score : 1.0);
+            const ceiPct = Math.round(ceiRaw * 100);
+            const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
+            const isLookingDown = data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("down");
+            const isDistracted = data.isLookingAway || data.is_looking_away || data.isLookingUp || data.is_looking_up || statusText.toLowerCase().includes("looking away") || statusText.toLowerCase().includes("distract");
+            const isSideChannelSpeech = data.audio_evasion || statusText.toLowerCase().includes("speaking");
+
+            if (isSideChannelSpeech || isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
                 badge.classList.add("badge-alert");
                 badge.innerHTML = `<span>🚨 ${ceiPct}% | ${safeStatus}</span>`;
             } else if (isDistracted || ceiPct < 70) {
                 badge.classList.add("badge-warning");
                 badge.innerHTML = `<span>⚠️ ${ceiPct}% | ${safeStatus}</span>`;
+            } else if (isLookingDown) {
+                badge.classList.add("badge-attentive");
+                badge.innerHTML = `<span>📖 ${ceiPct}% | ${safeStatus}</span>`;
             } else {
                 badge.classList.add("badge-attentive");
                 badge.innerHTML = `<span>🎯 ${ceiPct}% | ${safeStatus}</span>`;
@@ -738,21 +899,58 @@
         }
 
         // Heartbeat Watchdog: Prune stale attendees if network drops or laptop closes abruptly
+        // Preserves students whose active WebRTC media call is ongoing
         setInterval(() => {
             const now = Date.now();
             for (const [peerId, student] of connectedStudents.entries()) {
-                if (student.lastSeen && (now - student.lastSeen > 8000)) {
+                const pc = student.call && student.call.peerConnection;
+                const isCallLive = pc && (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected');
+                if (isCallLive) {
+                    student.lastSeen = now;
+                } else if (student.lastSeen && (now - student.lastSeen > 12000)) {
                     console.log(`Pruning inactive student peer (heartbeat timeout): ${peerId}`);
                     removeStudentRoster(peerId);
                 }
             }
         }, 3000);
 
+        // Cleanup helpers
+        function cleanupTeacherPeer() {
+            if (teacherPeerRetryTimer) {
+                clearTimeout(teacherPeerRetryTimer);
+                teacherPeerRetryTimer = null;
+            }
+            if (peer) {
+                try { peer.destroy(); } catch (_) {}
+                peer = null;
+            }
+            teacherReadiness.signaling = 'idle';
+        }
+
+        function cleanupTeacherSession() {
+            cleanupTeacherPeer();
+            for (const [peerId] of connectedStudents.entries()) {
+                removeStudentRoster(peerId);
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    try { track.stop(); } catch (_) {}
+                });
+                localStream = null;
+            }
+            teacherReadiness.webcam = 'idle';
+        }
+
+        window.addEventListener("beforeunload", () => {
+            cleanupTeacherSession();
+        });
+
         // Controls
         toggleMicBtn.addEventListener("click", () => {
             if (!localStream) return;
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (audioTrack) {
+            const audioTracks = localStream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                const audioTrack = audioTracks[0];
                 audioTrack.enabled = !audioTrack.enabled;
                 if (audioTrack.enabled) {
                     toggleMicBtn.classList.remove("off");
@@ -766,8 +964,9 @@
 
         toggleCamBtn.addEventListener("click", () => {
             if (!localStream) return;
-            const videoTrack = localStream.getVideoTracks()[0];
-            if (videoTrack) {
+            const videoTracks = localStream.getVideoTracks();
+            if (videoTracks.length > 0) {
+                const videoTrack = videoTracks[0];
                 videoTrack.enabled = !videoTrack.enabled;
                 if (videoTrack.enabled) {
                     toggleCamBtn.classList.remove("off");
@@ -802,7 +1001,7 @@
         });
 
         // Kick off Camera & Streamlit handshake
-        initCamera().then(() => {
+        initCamera().finally(() => {
             Streamlit.setComponentReady();
             resizeIframe();
         });

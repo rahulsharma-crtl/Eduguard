@@ -13,6 +13,9 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
+    <!-- Standalone EduGuard Engagement Engine -->
+    <script src="engagement.js"></script>
+
     <style>
         :root {
             --bg-color: #0E1117;
@@ -517,6 +520,35 @@
         let currentRoomId = null;
         let currentStudentName = "Student";
 
+        // Explicit Readiness States
+        const readinessState = {
+            webcam: 'idle',           // 'idle' | 'requesting' | 'ready' | 'error'
+            faceMesh: 'idle',         // 'idle' | 'loading' | 'ready' | 'error'
+            canvasStream: 'idle',     // 'idle' | 'ready' | 'error'
+            peerSignaling: 'idle',    // 'idle' | 'connecting' | 'ready' | 'error'
+            teacherStream: 'idle',    // 'idle' | 'calling' | 'connected' | 'closed' | 'error'
+            telemetryChannel: 'idle'  // 'idle' | 'connecting' | 'open' | 'closed' | 'error'
+        };
+        window.__eduguard_readiness = readinessState;
+
+        // Bounded Reconnection Config with Exponential Backoff
+        const ReconnectConfig = {
+            maxCallRetries: 6,
+            baseCallDelayMs: 1500,
+            maxCallDelayMs: 20000,
+            maxDataRetries: 6,
+            baseDataDelayMs: 1500,
+            maxDataDelayMs: 20000
+        };
+
+        let callRetryCount = 0;
+        let callRetryTimer = null;
+        let dataRetryCount = 0;
+        let dataRetryTimer = null;
+        let isLocalStreamInitializing = false;
+        let localStreamInitPromise = null;
+        let telemetryDataChannel = null;
+
         // Kinematics & Audio Counters
         let consecutiveClosedFrames = 0;
         let frameCount = 0;
@@ -533,6 +565,30 @@
         function setConnectionStatus(type, msg) {
             connStatusBadge.className = `connection-status status-${type}`;
             connStatusText.innerText = msg;
+        }
+
+        function updateOverallStatus() {
+            if (readinessState.webcam === 'error') {
+                setConnectionStatus("alert", "Camera & Microphone Permission Denied");
+            } else if (readinessState.webcam === 'requesting') {
+                setConnectionStatus("connecting", "Requesting Camera & Mic Access...");
+            } else if (readinessState.canvasStream !== 'ready') {
+                setConnectionStatus("connecting", "Preparing Privacy Mesh Stream...");
+            } else if (readinessState.peerSignaling === 'connecting') {
+                setConnectionStatus("connecting", "Connecting to WebRTC Signaling...");
+            } else if (readinessState.peerSignaling === 'error') {
+                setConnectionStatus("alert", "Signaling Server Error");
+            } else if (readinessState.teacherStream === 'calling') {
+                setConnectionStatus("connecting", "Calling Teacher Broadcast...");
+            } else if (readinessState.teacherStream === 'connected') {
+                setConnectionStatus("connected", "Connected to Teacher Live");
+            } else if (readinessState.teacherStream === 'closed' || readinessState.teacherStream === 'idle') {
+                if (callRetryCount > 0) {
+                    setConnectionStatus("connecting", `Waiting for Teacher... (${callRetryCount}/${ReconnectConfig.maxCallRetries})`);
+                } else {
+                    setConnectionStatus("connecting", "Waiting for Teacher to Start Broadcast...");
+                }
+            }
         }
 
         // --- 2. 6-Point EAR and Kinematics Math ---
@@ -558,6 +614,12 @@
             return (v1 + v2) / (2.0 * h);
         }
 
+        // Initialize Standalone Engagement Engine
+        let engagementEngine = null;
+        if (typeof EduGuardEngagement !== 'undefined' && EduGuardEngagement.EngagementEngine) {
+            engagementEngine = new EduGuardEngagement.EngagementEngine();
+        }
+
         // --- 3. MediaPipe FaceMesh & Canvas Anonymization Loop ---
         function onFaceMeshResults(results) {
             frameCount++;
@@ -567,19 +629,11 @@
             ctx.fillStyle = "#000000";
             ctx.fillRect(0, 0, privacyCanvas.width, privacyCanvas.height);
 
-            let presence = 0.0;
-            let attentiveness = 1.0;
-            let distraction = 0.0;
-            let avgEAR = 0.0;
-            let isDrowsy = false;
-            let isLookingAway = false;
-            let isLookingDown = false;
-            let statusStr = "Person Absent";
+            const landmarks = (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0)
+                ? results.multiFaceLandmarks[0]
+                : null;
 
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                presence = 1.0;
-                const landmarks = results.multiFaceLandmarks[0];
-
+            if (landmarks) {
                 // Render Neon Wireframe Mesh
                 // 1. Subtle cyan/green interior tessellation
                 if (window.FACEMESH_TESSELATION) {
@@ -601,71 +655,11 @@
                 if (window.FACEMESH_IRISES) {
                     drawConnectors(ctx, landmarks, FACEMESH_IRISES, { color: "#FFA500", lineWidth: 2 });
                 }
-
-                // --- 6-Point Soukupová & Čech EAR Formula ---
-                // Right Eye: [33, 160, 158, 133, 153, 144]
-                // Left Eye:  [362, 385, 387, 263, 373, 380]
-                const rightEAR = computeEAR(landmarks, [33, 160, 158, 133, 153, 144]);
-                const leftEAR = computeEAR(landmarks, [362, 385, 387, 263, 373, 380]);
-                avgEAR = (rightEAR + leftEAR) / 2.0;
-
-                // Temporal Debouncing for Blinks:
-                // >= 15 consecutive frames under 0.21 triggers drowsiness alert
-                if (avgEAR < 0.21) {
-                    consecutiveClosedFrames++;
-                } else {
-                    consecutiveClosedFrames = 0;
-                }
-
-                if (consecutiveClosedFrames >= 15) {
-                    isDrowsy = true;
-                    attentiveness -= 0.50;
-                    statusStr = "Drowsy (Eyes Closed)";
-                } else if (consecutiveClosedFrames > 4) {
-                    // Slight penalty if closing longer than natural micro-blink
-                    attentiveness -= 0.15;
-                }
-
-                // --- 2D Head Pose Heuristics ---
-                // Yaw: nose tip (1) vs left/right corners (263, 33)
-                const nose = landmarks[1];
-                const eyeLeft = landmarks[263];
-                const eyeRight = landmarks[33];
-                const dL = Math.abs(eyeLeft.x - nose.x);
-                const dR = Math.abs(nose.x - eyeRight.x);
-                const yawRatio = (dR > 0) ? (dL / dR) : 1.0;
-                if (yawRatio < 0.40 || yawRatio > 2.3) {
-                    isLookingAway = true;
-                    attentiveness -= 0.35;
-                    distraction += 0.30;
-                    if (!isDrowsy) statusStr = "Looking Away";
-                }
-
-                // Pitch: nose tip (1), forehead (10), chin (152)
-                const forehead = landmarks[10];
-                const chin = landmarks[152];
-                const dTop = Math.abs(nose.y - forehead.y);
-                const dBot = Math.abs(chin.y - nose.y);
-                const pitchRatio = (dBot > 0) ? (dTop / dBot) : 1.0;
-                if (pitchRatio < 0.45 || pitchRatio > 2.3) {
-                    isLookingDown = true;
-                    attentiveness -= 0.25;
-                    distraction += 0.20;
-                    if (!isDrowsy && !isLookingAway) statusStr = "Looking Down";
-                }
-
-                if (!isDrowsy && !isLookingAway && !isLookingDown) {
-                    statusStr = "Attentive";
-                }
-            } else {
-                presence = 0.0;
-                attentiveness = 0.0;
-                statusStr = "Subject Absent";
             }
 
             ctx.restore();
 
-            // --- Client-Side Audio Evasion Detection (Web Audio API) ---
+            // --- Client-Side Audio Analysis (Web Audio API) ---
             let isSpeechDetected = false;
             let audioRMS = 0.0;
             const audioTrack = (localUserMedia && localUserMedia.getAudioTracks().length > 0) ? localUserMedia.getAudioTracks()[0] : null;
@@ -694,65 +688,84 @@
                 speakingFrames = 0;
             }
 
-            // Audio Evasion & Anomalies
-            let isAudioEvasion = false;
-            if (isMicMuted) {
-                audioAlertStatus = "Mic Muted";
-            } else if (isSpeechDetected && (isLookingAway || isLookingDown)) {
-                // Suspicious: Vocal speech while gaze diverted from screen
-                isAudioEvasion = true;
-                audioAlertStatus = "Side-Channel Speech";
-                attentiveness = Math.max(0.0, attentiveness - 0.25);
-                distraction = Math.min(1.0, distraction + 0.30);
-                if (!isDrowsy) {
-                    statusStr = "Speaking (Gaze Diverted)";
-                }
-            } else if (isSpeechDetected) {
-                audioAlertStatus = "Speaking / Active Audio";
-            } else {
-                audioAlertStatus = "Clean / Quiet";
+            // Lazy initialize engine if script loaded asynchronously
+            if (!engagementEngine && typeof EduGuardEngagement !== 'undefined') {
+                engagementEngine = new EduGuardEngagement.EngagementEngine();
             }
 
-            // CEI Formula: E = (0.30 * P) + (0.45 * A) - (0.25 * D)
-            attentiveness = Math.max(0.0, Math.min(1.0, attentiveness));
-            distraction = Math.max(0.0, Math.min(1.0, distraction));
-            const rawCEI = (0.30 * presence) + (0.45 * attentiveness) - (0.25 * distraction);
-            let ceiScore = Math.max(0.0, Math.min(1.0, rawCEI));
-
-            // Instantaneous Lecturer Audio Evasion Penalty (50-70% heavy deduction while lecture is silenced)
-            if (isLecturerAudioSilenced) {
-                isAudioEvasion = true;
-                statusStr = "Audio Evasion: Muted";
-                ceiScore = Math.max(0.0, ceiScore * 0.40); // 60% penalty deduction
-                attentiveness = Math.max(0.0, attentiveness - 0.60);
-                distraction = Math.min(1.0, distraction + 0.50);
-            }
+            // Execute Engagement Engine Pipeline (Quality, Presence, Attention Proxies, CEI Inference)
+            const frameAnalysis = engagementEngine ? engagementEngine.processFrame(landmarks, Date.now(), {
+                isLecturerAudioMuted: isLecturerAudioSilenced,
+                isMicMuted: isMicMuted,
+                isSpeechDetected: isSpeechDetected
+            }) : {
+                quality: landmarks ? 'valid' : 'absent',
+                is_quality_sufficient: Boolean(landmarks),
+                is_unknown: false,
+                presence: landmarks ? 1.0 : 0.0,
+                attentiveness: landmarks ? 1.0 : 0.0,
+                distraction: 0.0,
+                ear: 0.32,
+                raw_cei: landmarks ? 1.0 : 0.0,
+                smoothed_cei: landmarks ? 1.0 : 0.0,
+                cei_score: landmarks ? 1.0 : 0.0,
+                status: landmarks ? "Attentive" : "Subject Absent",
+                is_drowsy: false,
+                is_looking_away: false,
+                is_looking_down: false,
+                is_looking_up: false,
+                is_speech_detected: isSpeechDetected,
+                is_mic_muted: isMicMuted,
+                is_lecturer_audio_muted: isLecturerAudioSilenced,
+                audio_status: isLecturerAudioSilenced ? "Lecturer Audio Muted" : (isMicMuted ? "Mic Muted" : "Active"),
+                audio_evasion: false
+            };
 
             // Update UI HUD
-            valCEI.innerText = `${(ceiScore * 100).toFixed(1)}%`;
-            valATT.innerText = `${(attentiveness * 100).toFixed(1)}%`;
-            valEAR.innerText = avgEAR.toFixed(2);
-            valStatus.innerText = statusStr;
-
-            barCEI.style.width = `${ceiScore * 100}%`;
-            barATT.style.width = `${attentiveness * 100}%`;
-            barEAR.style.width = `${Math.min(100, (avgEAR / 0.4) * 100)}%`;
-
-            if (isLecturerAudioSilenced) {
-                valStatus.style.color = "var(--danger-color)";
-                kinematicsTag.innerText = "🔇 Alert: Lecturer Audio Silenced";
-            } else if (isAudioEvasion) {
-                valStatus.style.color = "var(--danger-color)";
-                kinematicsTag.innerText = "🚨 Alert: Suspicious Vocal Activity";
-            } else if (isDrowsy) {
-                valStatus.style.color = "var(--danger-color)";
-                kinematicsTag.innerText = "⚠️ Alert: Prolonged Eye Closure";
-            } else if (isLookingAway || isLookingDown) {
+            if (frameAnalysis.is_unknown) {
+                valCEI.innerText = "--";
+                barCEI.style.width = "0%";
+                valATT.innerText = "--";
+                barATT.style.width = "0%";
+                valEAR.innerText = "--";
+                barEAR.style.width = "0%";
+                valStatus.innerText = "Observation Insufficient";
                 valStatus.style.color = "var(--warn-color)";
-                kinematicsTag.innerText = "⚠️ Alert: Gaze Divergent";
+                kinematicsTag.innerText = "🔍 Observation Insufficient (Assessing...)";
             } else {
-                valStatus.style.color = "var(--success-color)";
-                kinematicsTag.innerText = "🧑‍🎓 Privacy Mesh Active (Attentive)";
+                valCEI.innerText = `${(frameAnalysis.cei_score * 100).toFixed(1)}%`;
+                barCEI.style.width = `${frameAnalysis.cei_score * 100}%`;
+                valATT.innerText = `${(frameAnalysis.attentiveness * 100).toFixed(1)}%`;
+                barATT.style.width = `${frameAnalysis.attentiveness * 100}%`;
+                valEAR.innerText = (frameAnalysis.ear !== null ? frameAnalysis.ear.toFixed(2) : "0.00");
+                barEAR.style.width = `${Math.min(100, ((frameAnalysis.ear || 0) / 0.4) * 100)}%`;
+                valStatus.innerText = frameAnalysis.status;
+
+                if (frameAnalysis.status === "Subject Absent") {
+                    valStatus.style.color = "var(--danger-color)";
+                    kinematicsTag.innerText = "👤 Subject Absent";
+                } else if (frameAnalysis.is_drowsy) {
+                    valStatus.style.color = "var(--danger-color)";
+                    kinematicsTag.innerText = "⚠️ Alert: Prolonged Eye Closure";
+                } else if (frameAnalysis.audio_evasion) {
+                    valStatus.style.color = "var(--danger-color)";
+                    kinematicsTag.innerText = "🚨 Alert: Suspicious Vocal Activity";
+                } else if (frameAnalysis.is_looking_down) {
+                    // Pedagogical observable state: Reading textbook, taking notes, or writing
+                    valStatus.style.color = "#3b82f6";
+                    kinematicsTag.innerText = "📖 Observable Pose: Looking Down (Notes / Reading)";
+                } else if (frameAnalysis.is_looking_away || frameAnalysis.is_looking_up) {
+                    valStatus.style.color = "var(--warn-color)";
+                    kinematicsTag.innerText = "⚠️ Alert: Gaze Divergent";
+                } else {
+                    valStatus.style.color = "var(--success-color)";
+                    kinematicsTag.innerText = "🧑‍🎓 Privacy Mesh Active (Attentive)";
+                }
+            }
+
+            // Represent lecturer audio muted as separate UI state (never as an artificial CEI penalty)
+            if (isLecturerAudioSilenced) {
+                kinematicsTag.innerText += " (🔇 Lecture Muted)";
             }
 
             // Dispatch to Streamlit & Teacher once every ~2.5s (reduces WebSocket event volume)
@@ -763,20 +776,28 @@
                     type: "telemetry",
                     peerId: peer ? peer.id : null,
                     studentName: currentStudentName,
-                    cei_score: ceiScore,
-                    attentiveness: attentiveness,
-                    distraction: distraction,
-                    presence: presence,
-                    ear: avgEAR,
-                    is_drowsy: isDrowsy,
-                    is_looking_away: isLookingAway,
-                    is_speech_detected: isSpeechDetected,
-                    is_mic_muted: isMicMuted,
+                    cei_score: frameAnalysis.cei_score,
+                    raw_cei: frameAnalysis.raw_cei,
+                    smoothed_cei: frameAnalysis.smoothed_cei,
+                    attentiveness: frameAnalysis.attentiveness,
+                    distraction: frameAnalysis.distraction,
+                    presence: frameAnalysis.presence,
+                    ear: frameAnalysis.ear,
+                    is_unknown: frameAnalysis.is_unknown,
+                    is_quality_sufficient: frameAnalysis.is_quality_sufficient,
+                    is_drowsy: frameAnalysis.is_drowsy,
+                    is_looking_away: frameAnalysis.is_looking_away,
+                    is_looking_down: frameAnalysis.is_looking_down,
+                    is_looking_up: frameAnalysis.is_looking_up,
+                    is_speech_detected: frameAnalysis.is_speech_detected,
+                    is_mic_muted: frameAnalysis.is_mic_muted,
                     is_lecturer_audio_muted: isLecturerAudioSilenced,
                     audio_energy: parseFloat(audioEnergyLevel.toFixed(3)),
-                    audio_status: isLecturerAudioSilenced ? "Lecturer Audio Muted" : audioAlertStatus,
-                    audio_evasion: isAudioEvasion || isLecturerAudioSilenced,
-                    status: isLecturerAudioSilenced ? "Audio Evasion: Muted" : statusStr
+                    audio_status: frameAnalysis.audio_status,
+                    audio_evasion: frameAnalysis.audio_evasion,
+                    status: frameAnalysis.status,
+                    head_pose: frameAnalysis.head_pose || null,
+                    behavioral_state: frameAnalysis.behavioral_state || null
                 };
 
                 // 1. Dispatch to Streamlit for SQLite session database logging
@@ -795,84 +816,163 @@
         }
 
         // --- 4. Initialize Local Webcam & Virtual Canvas Stream ---
-        async function initLocalStream() {
-            try {
-                localUserMedia = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480, frameRate: { ideal: 30 } },
-                    audio: true
-                });
-                rawWebcam.srcObject = localUserMedia;
-                await rawWebcam.play();
+        function areCallPrerequisitesReady() {
+            return (
+                readinessState.canvasStream === 'ready' &&
+                readinessState.peerSignaling === 'ready' &&
+                Boolean(currentRoomId) &&
+                Boolean(peer) &&
+                !peer.destroyed &&
+                peer.open &&
+                Boolean(virtualCanvasStream)
+            );
+        }
 
-                // Create Virtual Synthetic Video Track from Privacy Canvas
-                virtualCanvasStream = privacyCanvas.captureStream(25);
+        function checkAndEstablishConnection() {
+            if (!currentRoomId) return;
 
-                // Add mic audio track to the canvas stream so teacher can hear student
-                const audioTracks = localUserMedia.getAudioTracks();
-                if (audioTracks.length > 0) {
-                    virtualCanvasStream.addTrack(audioTracks[0]);
-                }
-
-                // Initialize Client-Side Audio Analyser (Privacy-preserving local speech & evasion detection)
-                try {
-                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                    if (AudioContextClass && audioTracks.length > 0) {
-                        audioContext = new AudioContextClass();
-                        audioAnalyser = audioContext.createAnalyser();
-                        audioAnalyser.fftSize = 256;
-                        audioAnalyser.smoothingTimeConstant = 0.3;
-                        const audioSource = audioContext.createMediaStreamSource(localUserMedia);
-                        audioSource.connect(audioAnalyser);
-                        audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
-                        console.log("Client-side acoustic evasion analyser initialized successfully.");
-                    }
-                } catch (audioErr) {
-                    console.warn("Client audio analyser initialization notice:", audioErr);
-                }
-
-                // Initialize MediaPipe FaceMesh
-                const faceMesh = new FaceMesh({
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-                });
-
-                faceMesh.setOptions({
-                    maxNumFaces: 1,
-                    refineLandmarks: true,
-                    minDetectionConfidence: 0.5,
-                    minTrackingConfidence: 0.5
-                });
-
-                faceMesh.onResults(onFaceMeshResults);
-
-                // Start Camera frame ingest loop
-                const camera = new Camera(rawWebcam, {
-                    onFrame: async () => {
-                        await faceMesh.send({ image: rawWebcam });
-                    },
-                    width: 640,
-                    height: 480
-                });
-                camera.start();
-
-                console.log("Local camera and FaceMesh initialized successfully.");
-            } catch (err) {
-                console.error("Local camera initialization failed:", err);
-                setConnectionStatus("alert", "Camera Permission Denied");
+            if (!areCallPrerequisitesReady()) {
+                updateOverallStatus();
+                return;
             }
+
+            const teacherPeerId = `${currentRoomId}-teacher`;
+
+            // Establish Call if not already connected or in-flight
+            if (readinessState.teacherStream !== 'calling' && readinessState.teacherStream !== 'connected') {
+                callTeacher(teacherPeerId);
+            }
+
+            // Establish Telemetry DataChannel if not open or in-flight
+            if (readinessState.telemetryChannel !== 'connecting' && readinessState.telemetryChannel !== 'open') {
+                connectTelemetryDataChannel(teacherPeerId);
+            }
+        }
+
+        async function initLocalStream() {
+            if (isLocalStreamInitializing) return localStreamInitPromise;
+            isLocalStreamInitializing = true;
+            readinessState.webcam = 'requesting';
+            updateOverallStatus();
+
+            localStreamInitPromise = (async () => {
+                try {
+                    localUserMedia = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                        audio: true
+                    });
+                    rawWebcam.srcObject = localUserMedia;
+                    await rawWebcam.play();
+                    readinessState.webcam = 'ready';
+
+                    // Ensure privacyCanvas has initial frame rendered
+                    ctx.fillStyle = "#000000";
+                    ctx.fillRect(0, 0, privacyCanvas.width, privacyCanvas.height);
+
+                    // Create Virtual Synthetic Video Track from Privacy Canvas
+                    virtualCanvasStream = privacyCanvas.captureStream(25);
+
+                    // Add mic audio track to the canvas stream so teacher can hear student
+                    const audioTracks = localUserMedia.getAudioTracks();
+                    if (audioTracks.length > 0) {
+                        virtualCanvasStream.addTrack(audioTracks[0]);
+                    }
+
+                    // Strict Privacy Guard: Verify no raw webcam video track is transmitted
+                    const canvasVideoTracks = virtualCanvasStream.getVideoTracks();
+                    const rawVideoTracks = localUserMedia.getVideoTracks();
+                    for (const rawTrack of rawVideoTracks) {
+                        if (canvasVideoTracks.includes(rawTrack)) {
+                            virtualCanvasStream.removeTrack(rawTrack);
+                            console.error("CRITICAL PRIVACY VIOLATION PREVENTED: Raw webcam track removed from outbound stream.");
+                        }
+                    }
+
+                    readinessState.canvasStream = 'ready';
+
+                    // Initialize Client-Side Audio Analyser (Privacy-preserving local speech & evasion detection)
+                    try {
+                        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                        if (AudioContextClass && audioTracks.length > 0) {
+                            audioContext = new AudioContextClass();
+                            audioAnalyser = audioContext.createAnalyser();
+                            audioAnalyser.fftSize = 256;
+                            audioAnalyser.smoothingTimeConstant = 0.3;
+                            const audioSource = audioContext.createMediaStreamSource(localUserMedia);
+                            audioSource.connect(audioAnalyser);
+                            audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+                            console.log("Client-side acoustic evasion analyser initialized successfully.");
+                        }
+                    } catch (audioErr) {
+                        console.warn("Client audio analyser initialization notice:", audioErr);
+                    }
+
+                    // Initialize MediaPipe FaceMesh
+                    readinessState.faceMesh = 'loading';
+                    const faceMesh = new FaceMesh({
+                        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+                    });
+
+                    faceMesh.setOptions({
+                        maxNumFaces: 1,
+                        refineLandmarks: true,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+
+                    faceMesh.onResults((results) => {
+                        if (readinessState.faceMesh !== 'ready') {
+                            readinessState.faceMesh = 'ready';
+                        }
+                        onFaceMeshResults(results);
+                    });
+
+                    // Start Camera frame ingest loop
+                    const camera = new Camera(rawWebcam, {
+                        onFrame: async () => {
+                            await faceMesh.send({ image: rawWebcam });
+                        },
+                        width: 640,
+                        height: 480
+                    });
+                    camera.start();
+
+                    console.log("Local camera and FaceMesh initialized successfully.");
+                    checkAndEstablishConnection();
+                } catch (err) {
+                    console.error("Local camera initialization failed:", err);
+                    readinessState.webcam = 'error';
+                    readinessState.canvasStream = 'error';
+                    setConnectionStatus("alert", "Camera/Mic Permission Denied");
+                } finally {
+                    isLocalStreamInitializing = false;
+                }
+            })();
+
+            return localStreamInitPromise;
         }
 
         // --- 5. WebRTC Peer Connection & Call to Teacher ---
         function initStudentPeer(roomId, studentName) {
-            if (peer && !peer.destroyed) return;
-
             const cleanRoom = roomId.replace(/[^a-zA-Z0-9_-]/g, "");
             const cleanName = studentName.replace(/[^a-zA-Z0-9_-]/g, "") || "Student";
+
+            if (peer && !peer.destroyed && currentRoomId === cleanRoom) {
+                checkAndEstablishConnection();
+                return;
+            }
+
+            cleanupPeer();
+
+            currentRoomId = cleanRoom;
+            currentStudentName = cleanName;
             const studentPeerId = `${cleanRoom}-student-${cleanName}-${Math.floor(Math.random() * 10000)}`;
             const teacherPeerId = `${cleanRoom}-teacher`;
 
             roomBadge.innerText = `Classroom: ${cleanRoom}`;
             studentBadge.innerText = `Student: ${cleanName}`;
-            setConnectionStatus("connecting", "Calling Teacher Broadcast...");
+            readinessState.peerSignaling = 'connecting';
+            updateOverallStatus();
 
             peer = new Peer(studentPeerId, {
                 debug: 1,
@@ -887,34 +987,78 @@
 
             peer.on("open", (id) => {
                 console.log(`Student peer registered with ID: ${id}`);
-                callTeacher(teacherPeerId);
-                connectTelemetryDataChannel(teacherPeerId);
+                readinessState.peerSignaling = 'ready';
+                checkAndEstablishConnection();
             });
 
             peer.on("error", (err) => {
                 console.error("PeerJS error:", err);
                 if (err.type === "peer-unavailable") {
-                    setConnectionStatus("connecting", "Waiting for Teacher to Start Broadcast...");
-                    // Retry calling teacher after 3 seconds
-                    setTimeout(() => {
-                        callTeacher(teacherPeerId);
-                        connectTelemetryDataChannel(teacherPeerId);
-                    }, 3000);
+                    readinessState.teacherStream = 'closed';
+                    scheduleCallReconnect(teacherPeerId);
                 } else {
+                    readinessState.peerSignaling = 'error';
                     setConnectionStatus("alert", `WebRTC: ${err.type || "Error"}`);
                 }
             });
+
+            peer.on("disconnected", () => {
+                console.warn("PeerJS disconnected from signaling server.");
+                readinessState.peerSignaling = 'connecting';
+                if (peer && !peer.destroyed) {
+                    try { peer.reconnect(); } catch (_) {}
+                }
+            });
+
+            peer.on("close", () => {
+                readinessState.peerSignaling = 'idle';
+                cleanupPeer();
+            });
         }
 
-        let telemetryDataChannel = null;
+        function scheduleCallReconnect(teacherPeerId) {
+            if (callRetryTimer) {
+                clearTimeout(callRetryTimer);
+                callRetryTimer = null;
+            }
+
+            if (!currentRoomId || !peer || peer.destroyed) return;
+
+            if (callRetryCount < ReconnectConfig.maxCallRetries) {
+                callRetryCount++;
+                const delay = Math.min(
+                    Math.round(ReconnectConfig.baseCallDelayMs * Math.pow(1.8, callRetryCount - 1)),
+                    ReconnectConfig.maxCallDelayMs
+                );
+                const delaySec = (delay / 1000).toFixed(1);
+                console.log(`Scheduling call reconnect to teacher in ${delay}ms (attempt ${callRetryCount}/${ReconnectConfig.maxCallRetries})`);
+                setConnectionStatus("connecting", `Waiting for Teacher... Retrying in ${delaySec}s (${callRetryCount}/${ReconnectConfig.maxCallRetries})`);
+
+                callRetryTimer = setTimeout(() => {
+                    callRetryTimer = null;
+                    if (areCallPrerequisitesReady()) {
+                        callTeacher(teacherPeerId || `${currentRoomId}-teacher`);
+                    }
+                }, delay);
+            } else {
+                console.warn(`Max call reconnection attempts (${ReconnectConfig.maxCallRetries}) reached.`);
+                setConnectionStatus("alert", `Teacher broadcast unreachable (${ReconnectConfig.maxCallRetries} attempts). Click status to retry.`);
+            }
+        }
 
         function connectTelemetryDataChannel(teacherPeerId) {
-            if (!peer || peer.destroyed) return;
+            if (!peer || peer.destroyed || !peer.open) return;
             const isAlreadyConnected = telemetryDataChannel && (
                 telemetryDataChannel.open || 
                 (telemetryDataChannel.dataChannel && telemetryDataChannel.dataChannel.readyState === "open")
             );
-            if (isAlreadyConnected) return;
+            if (isAlreadyConnected) {
+                readinessState.telemetryChannel = 'open';
+                return;
+            }
+
+            cleanupTelemetryChannel();
+            readinessState.telemetryChannel = 'connecting';
 
             try {
                 console.log(`Opening WebRTC DataChannel to teacher: ${teacherPeerId}`);
@@ -922,46 +1066,192 @@
 
                 telemetryDataChannel.on("open", () => {
                     console.log("Telemetry DataChannel connection active with teacher!");
+                    dataRetryCount = 0;
+                    if (dataRetryTimer) {
+                        clearTimeout(dataRetryTimer);
+                        dataRetryTimer = null;
+                    }
+                    readinessState.telemetryChannel = 'open';
                 });
 
                 telemetryDataChannel.on("close", () => {
-                    console.log("Telemetry DataChannel closed, retrying in 3s...");
-                    setTimeout(() => connectTelemetryDataChannel(teacherPeerId), 3000);
+                    console.log("Telemetry DataChannel closed.");
+                    readinessState.telemetryChannel = 'closed';
+                    cleanupTelemetryChannel();
+                    scheduleDataChannelReconnect(teacherPeerId);
                 });
 
                 telemetryDataChannel.on("error", (err) => {
-                    console.warn("Telemetry DataChannel warning:", err);
-                    setTimeout(() => connectTelemetryDataChannel(teacherPeerId), 3000);
+                    console.warn("Telemetry DataChannel error:", err);
+                    readinessState.telemetryChannel = 'error';
+                    cleanupTelemetryChannel();
+                    scheduleDataChannelReconnect(teacherPeerId);
                 });
             } catch (err) {
                 console.warn("Failed to create DataChannel:", err);
+                readinessState.telemetryChannel = 'error';
+                scheduleDataChannelReconnect(teacherPeerId);
+            }
+        }
+
+        function scheduleDataChannelReconnect(teacherPeerId) {
+            if (dataRetryTimer) {
+                clearTimeout(dataRetryTimer);
+                dataRetryTimer = null;
+            }
+            if (!currentRoomId || !peer || peer.destroyed) return;
+
+            if (dataRetryCount < ReconnectConfig.maxDataRetries) {
+                dataRetryCount++;
+                const delay = Math.min(
+                    Math.round(ReconnectConfig.baseDataDelayMs * Math.pow(1.8, dataRetryCount - 1)),
+                    ReconnectConfig.maxDataDelayMs
+                );
+                dataRetryTimer = setTimeout(() => {
+                    dataRetryTimer = null;
+                    if (peer && !peer.destroyed && peer.open) {
+                        connectTelemetryDataChannel(teacherPeerId || `${currentRoomId}-teacher`);
+                    }
+                }, delay);
             }
         }
 
         function callTeacher(teacherPeerId) {
-            if (!peer || peer.destroyed || !virtualCanvasStream) return;
+            if (!areCallPrerequisitesReady()) return;
 
+            cleanupActiveCall();
+            readinessState.teacherStream = 'calling';
+            setConnectionStatus("connecting", "Calling Teacher Broadcast...");
             console.log(`Initiating outbound WebRTC call to teacher: ${teacherPeerId}`);
-            activeCall = peer.call(teacherPeerId, virtualCanvasStream);
+
+            try {
+                activeCall = peer.call(teacherPeerId, virtualCanvasStream);
+            } catch (err) {
+                console.warn("PeerJS call initiation failed:", err);
+                readinessState.teacherStream = 'error';
+                scheduleCallReconnect(teacherPeerId);
+                return;
+            }
+
+            if (!activeCall) {
+                readinessState.teacherStream = 'error';
+                scheduleCallReconnect(teacherPeerId);
+                return;
+            }
 
             activeCall.on("stream", (teacherStream) => {
                 console.log("Attached incoming live teacher broadcast stream.");
+                callRetryCount = 0;
+                if (callRetryTimer) {
+                    clearTimeout(callRetryTimer);
+                    callRetryTimer = null;
+                }
+                readinessState.teacherStream = 'connected';
                 teacherFeed.srcObject = teacherStream;
+                teacherFeed.play().catch(e => console.warn("Teacher feed autoplay prevented:", e));
                 teacherStreamTag.innerText = "Broadcasting Live";
                 teacherStreamTag.style.color = "var(--success-color)";
                 setConnectionStatus("connected", "Connected to Teacher Live");
             });
 
             activeCall.on("close", () => {
-                console.log("Teacher stream closed.");
+                console.log("Teacher stream call closed.");
+                readinessState.teacherStream = 'closed';
+                cleanupActiveCall();
                 teacherStreamTag.innerText = "Broadcast Ended";
                 teacherStreamTag.style.color = "var(--danger-color)";
-                setConnectionStatus("connecting", "Teacher Stream Disconnected");
+                scheduleCallReconnect(teacherPeerId);
             });
 
             activeCall.on("error", (err) => {
                 console.warn("Call error with teacher:", err);
-                setTimeout(() => callTeacher(teacherPeerId), 3000);
+                readinessState.teacherStream = 'error';
+                cleanupActiveCall();
+                scheduleCallReconnect(teacherPeerId);
+            });
+        }
+
+        function cleanupActiveCall() {
+            if (activeCall) {
+                try {
+                    activeCall.close();
+                } catch (_) {}
+                activeCall = null;
+            }
+            if (teacherFeed && teacherFeed.srcObject) {
+                teacherFeed.srcObject = null;
+            }
+        }
+
+        function cleanupTelemetryChannel() {
+            if (dataRetryTimer) {
+                clearTimeout(dataRetryTimer);
+                dataRetryTimer = null;
+            }
+            if (telemetryDataChannel) {
+                try {
+                    telemetryDataChannel.close();
+                } catch (_) {}
+                telemetryDataChannel = null;
+            }
+        }
+
+        function cleanupPeer() {
+            if (callRetryTimer) {
+                clearTimeout(callRetryTimer);
+                callRetryTimer = null;
+            }
+            cleanupActiveCall();
+            cleanupTelemetryChannel();
+            if (peer) {
+                try {
+                    peer.destroy();
+                } catch (_) {}
+                peer = null;
+            }
+            readinessState.peerSignaling = 'idle';
+            readinessState.teacherStream = 'idle';
+            readinessState.telemetryChannel = 'idle';
+        }
+
+        function cleanupLocalMedia() {
+            if (localUserMedia) {
+                localUserMedia.getTracks().forEach(track => {
+                    try { track.stop(); } catch (_) {}
+                });
+                localUserMedia = null;
+            }
+            if (virtualCanvasStream) {
+                virtualCanvasStream.getTracks().forEach(track => {
+                    try { track.stop(); } catch (_) {}
+                });
+                virtualCanvasStream = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                try { audioContext.close(); } catch (_) {}
+                audioContext = null;
+            }
+            readinessState.webcam = 'idle';
+            readinessState.canvasStream = 'idle';
+        }
+
+        function cleanupAll() {
+            cleanupPeer();
+            cleanupLocalMedia();
+        }
+
+        // Allow user to click status badge to trigger manual reconnection if disconnected/error
+        if (connStatusBadge) {
+            connStatusBadge.style.cursor = "pointer";
+            connStatusBadge.title = "Click to retry connection";
+            connStatusBadge.addEventListener("click", () => {
+                if (readinessState.teacherStream !== 'connected') {
+                    callRetryCount = 0;
+                    dataRetryCount = 0;
+                    if (callRetryTimer) clearTimeout(callRetryTimer);
+                    if (dataRetryTimer) clearTimeout(dataRetryTimer);
+                    checkAndEstablishConnection();
+                }
             });
         }
 
@@ -1026,8 +1316,9 @@
 
         toggleStudentMicBtn.addEventListener("click", () => {
             if (!localUserMedia) return;
-            const audioTrack = localUserMedia.getAudioTracks()[0];
-            if (audioTrack) {
+            const audioTracks = localUserMedia.getAudioTracks();
+            if (audioTracks.length > 0) {
+                const audioTrack = audioTracks[0];
                 audioTrack.enabled = !audioTrack.enabled;
                 if (audioTrack.enabled) {
                     toggleStudentMicBtn.classList.remove("off");
@@ -1057,19 +1348,13 @@
             if (telemetryDataChannel && (telemetryDataChannel.open || telemetryDataChannel.readyState === "open")) {
                 try {
                     telemetryDataChannel.send({ type: "student_left", peerId: peer ? peer.id : null });
-                    telemetryDataChannel.close();
                 } catch (_) {}
             }
-            if (activeCall) {
-                try { activeCall.close(); } catch (_) {}
-            }
-            if (peer) {
-                try { peer.destroy(); } catch (_) {}
-            }
+            cleanupAll();
         });
 
         // Initialize Local Hardware & Handshake
-        initLocalStream().then(() => {
+        initLocalStream().finally(() => {
             Streamlit.setComponentReady();
             resizeIframe();
         });

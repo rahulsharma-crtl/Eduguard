@@ -1,0 +1,14 @@
+{
+  "name": "eduguard-classroom",
+  "version": "1.0.0",
+  "description": "EduGuard Cloud Privacy Analytics & Classroom Telemetry",
+  "scripts": {
+    "test:js": "node --test tests/js/*.test.mjs",
+    "test:py": "pytest -v",
+    "test": "npm run test:js && npm run test:py",
+    "lint:js": "node scripts/lint_frontend.js",
+    "lint:py": "flake8 core/ config.py tests/ --statistics",
+    "lint": "npm run lint:js && npm run lint:py"
+  },
+  "devDependencies": {}
+}
