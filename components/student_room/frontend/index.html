@@ -1176,16 +1176,19 @@
                 return;
             }
 
-            const mediaConnection = activeCall.peerConnection;
+            const thisCall = activeCall;
+            const mediaConnection = thisCall.peerConnection;
             if (mediaConnection) {
                 mediaConnection.addEventListener('connectionstatechange', () => {
+                    if (activeCall !== thisCall) return;
                     if (mediaConnection.connectionState === 'failed') {
                         setConnectionStatus('alert', 'Video connection failed. This network may require a TURN relay.');
                         teacherStreamTag.innerText = 'Network blocked media connection';
                     }
                 });
             }
-            activeCall.on("stream", (teacherStream) => {
+            thisCall.on("stream", (teacherStream) => {
+                if (activeCall !== thisCall) return;
                 console.log("Attached incoming live teacher broadcast stream.");
                 callRetryCount = 0;
                 if (callRetryTimer) {
@@ -1199,7 +1202,8 @@
                 setConnectionStatus("connected", "Connected to Teacher Live");
             });
 
-            activeCall.on("close", () => {
+            thisCall.on("close", () => {
+                if (activeCall !== thisCall) return;
                 console.log("Teacher stream call closed.");
                 readinessState.teacherStream = 'closed';
                 cleanupActiveCall();
@@ -1208,7 +1212,8 @@
                 scheduleCallReconnect(teacherPeerId);
             });
 
-            activeCall.on("error", (err) => {
+            thisCall.on("error", (err) => {
+                if (activeCall !== thisCall) return;
                 console.warn("Call error with teacher:", err);
                 readinessState.teacherStream = 'error';
                 cleanupActiveCall();
@@ -1218,10 +1223,9 @@
 
         function cleanupActiveCall() {
             if (activeCall) {
-                try {
-                    activeCall.close();
-                } catch (_) {}
+                const closingCall = activeCall;
                 activeCall = null;
+                try { closingCall.close(); } catch (_) {}
             }
             if (teacherFeed && teacherFeed.srcObject) {
                 teacherFeed.srcObject = null;

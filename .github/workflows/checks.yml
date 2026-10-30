@@ -17,3 +17,5 @@ jobs:
       - run: npm run lint:js
       - run: python -m pytest -q
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: node --test tests/browser/webrtc.test.mjs

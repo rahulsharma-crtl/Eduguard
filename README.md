@@ -61,3 +61,5 @@ npm run build
 ### Blank lecture / restricted networks
 
 If the browser blocks audio autoplay, student video now retries muted and shows a Play lecture / enable audio button. Click it inside the lecture panel. The teacher must have a working local camera preview. For networks where direct media cannot connect, configure the API ICE_SERVERS_JSON environment variable with a JSON array containing STUN and your provider's browser-usable TURN credentials, then redeploy the API and reload both classrooms. Never use your TURN provider account/API secret as a browser credential. Signaling alone cannot relay media through restrictive NAT/firewalls.
+
+Run `npm run test:media` for a real two-page WebRTC smoke test using synthetic cameras. It uses installed Chrome on Windows, or install Chromium with `npx playwright install chromium`. No physical camera or microphone is used. CI runs this test after building the static classroom assets.

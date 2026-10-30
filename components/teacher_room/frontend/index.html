@@ -694,12 +694,12 @@
 
                 call.on("close", () => {
                     console.log(`Student call closed: ${call.peer}`);
-                    removeStudentRoster(call.peer);
+                    if (connectedStudents.get(call.peer)?.call === call) removeStudentRoster(call.peer);
                 });
 
                 call.on("error", (err) => {
                     console.warn(`Call error from ${call.peer}:`, err);
-                    removeStudentRoster(call.peer);
+                    if (connectedStudents.get(call.peer)?.call === call) removeStudentRoster(call.peer);
                 });
             });
 
@@ -716,11 +716,12 @@
                 });
                 conn.on("close", () => {
                     console.log(`Telemetry DataChannel closed from: ${conn.peer}`);
-                    removeStudentRoster(conn.peer);
+                    // Data and media use separate connections. Keep an existing media call.
+                    if (!connectedStudents.get(conn.peer)?.call) removeStudentRoster(conn.peer);
                 });
                 conn.on("error", (err) => {
                     console.warn(`DataChannel error from ${conn.peer}:`, err);
-                    removeStudentRoster(conn.peer);
+                    if (!connectedStudents.get(conn.peer)?.call) removeStudentRoster(conn.peer);
                 });
             });
         }
@@ -737,6 +738,18 @@
 
         // Render Student in Horizontal Roster Table (Zero Video Elements, Names & Status Only)
         function renderStudentRoster(peerId, stream, call) {
+            const existing = connectedStudents.get(peerId);
+            if (existing && existing.call === call && call) {
+                // Multiple tracks/renegotiation can announce the same media call again.
+                // Refresh its stream rather than closing it while rebuilding the row.
+                existing.stream = stream;
+                existing.lastSeen = Date.now();
+                if (existing.audioElem && stream) {
+                    existing.audioElem.srcObject = stream;
+                    existing.audioElem.play().catch(() => {});
+                }
+                return;
+            }
             removeStudentRoster(peerId);
 
             if (emptyRosterRow) {
@@ -814,6 +827,8 @@
         function removeStudentRoster(peerId) {
             if (connectedStudents.has(peerId)) {
                 const item = connectedStudents.get(peerId);
+                // Remove first: call.close() can synchronously emit another close event.
+                connectedStudents.delete(peerId);
                 if (item.audioElem) {
                     try {
                         item.audioElem.pause();

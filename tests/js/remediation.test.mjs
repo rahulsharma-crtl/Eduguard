@@ -54,3 +54,27 @@ test('Allowed playback keeps the lecture audio control out of the way', async ()
     vm.createContext(context);vm.runInContext(code,context);await context.playTeacherStream({});
     assert.equal(context.teacherFeed.muted,false);assert.equal(context.resumeLectureBtn.hidden,true);
 });
+
+test('Repeated stream events preserve the teacher media call instead of closing it', () => {
+    const html=readFileSync('components/teacher_room/frontend/index.html','utf8');
+    const code=html.slice(html.indexOf('function renderStudentRoster('),html.indexOf('function removeStudentRoster('));
+    let closes=0,plays=0;
+    const call={close:()=>closes++};
+    const oldStream={},newStream={};
+    const row={call,stream:oldStream,lastSeen:0,audioElem:{srcObject:oldStream,play:()=>{plays++;return Promise.resolve()}}};
+    const context={connectedStudents:new Map([['Alice',row]]),removeStudentRoster:()=>{closes++}};
+    vm.createContext(context);vm.runInContext(code,context);
+    context.renderStudentRoster('Alice',newStream,call);
+    context.renderStudentRoster('Alice',newStream,call);
+    assert.equal(closes,0);assert.equal(plays,2);assert.equal(row.stream,newStream);
+});
+test('Closing a teacher roster entry tolerates synchronous call close callbacks', () => {
+    const html=readFileSync('components/teacher_room/frontend/index.html','utf8');
+    const code=html.slice(html.indexOf('function removeStudentRoster('),html.indexOf('// Dynamic Badge Telemetry Updater'));
+    let closes=0;
+    const context={connectedStudents:new Map(),emptyRosterRow:{style:{}},updateStudentCount:()=>{},resizeIframe:()=>{}};
+    vm.createContext(context);vm.runInContext(code,context);
+    context.connectedStudents.set('Alice',{call:{close:()=>{closes++;context.removeStudentRoster('Alice')}}});
+    context.removeStudentRoster('Alice');
+    assert.equal(closes,1);assert.equal(context.connectedStudents.size,0);
+});
