@@ -57,3 +57,7 @@ npm run build
 `tests/js` includes synthetic-landmark regressions and a local signaling integration test. Real-video capture is at `benchmarks/capture.html` (serve the repository with `python -m http.server 8001`); run `npm run benchmark:video -- dataset.json report.json` on consented, independently labeled clips. No real-video accuracy is claimed without such data.
 
 `AUDIT.md` is the historical Streamlit audit. `REMEDIATION.md` records the fixes and the migration. Deployment references: [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite), [FastAPI CORS](https://fastapi.tiangolo.com/tutorial/cors/), [Render Blueprints](https://render.com/docs/blueprint-spec).
+
+### Blank lecture / restricted networks
+
+If the browser blocks audio autoplay, student video now retries muted and shows a Play lecture / enable audio button. Click it inside the lecture panel. The teacher must have a working local camera preview. For networks where direct media cannot connect, configure the API ICE_SERVERS_JSON environment variable with a JSON array containing STUN and your provider's browser-usable TURN credentials, then redeploy the API and reload both classrooms. Never use your TURN provider account/API secret as a browser credential. Signaling alone cannot relay media through restrictive NAT/firewalls.

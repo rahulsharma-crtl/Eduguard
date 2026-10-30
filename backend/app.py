@@ -2,6 +2,7 @@
 import csv
 import hmac
 import io
+import json
 import os
 import threading
 import time
@@ -31,13 +32,15 @@ class Settings:
     teacher_password: str
     origins: list[str]
     signaling_url: str
+    ice_servers_json: str = '[{"urls":"stun:stun.l.google.com:19302"}]'
 
     @classmethod
     def from_env(cls):
         return cls(os.getenv('DATABASE_URL', 'sqlite:///eduguard_api.db'),
                    os.getenv('AUTH_SIGNING_KEY', ''), os.getenv('TEACHER_ADMIN_PASSWORD', ''),
                    [x.strip() for x in os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if x.strip()],
-                   os.getenv('SIGNALING_URL', 'http://localhost:9000'))
+                   os.getenv('SIGNALING_URL', 'http://localhost:9000'),
+                   os.getenv('ICE_SERVERS_JSON', '[{"urls":"stun:stun.l.google.com:19302"}]'))
 
 
 class CreateRoom(BaseModel):
@@ -126,7 +129,14 @@ def create_app(settings=None):
         url = urlparse(settings.signaling_url)
         if url.scheme not in ('http', 'https') or not url.hostname:
             raise HTTPException(503, 'Signaling server is not configured')
-        return {'signaling': {'host': url.hostname, 'port': url.port or (443 if url.scheme == 'https' else 80),
+        try:
+            ice_servers = json.loads(settings.ice_servers_json)
+            if not isinstance(ice_servers, list) or not ice_servers or any(
+                    not isinstance(server, dict) or not server.get('urls') for server in ice_servers):
+                raise ValueError('Invalid ICE servers')
+        except (ValueError, TypeError):
+            raise HTTPException(503, 'ICE_SERVERS_JSON must be a nonempty JSON array of ICE servers')
+        return {'signaling': {'iceServers': ice_servers, 'host': url.hostname, 'port': url.port or (443 if url.scheme == 'https' else 80),
                                'secure': url.scheme == 'https', 'path': '/eduguard'}}
 
     @app.post('/rooms', status_code=201)

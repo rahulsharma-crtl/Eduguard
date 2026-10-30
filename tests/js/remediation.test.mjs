@@ -34,3 +34,23 @@ test('Real-video benchmark refuses synthetic input and reports missing class cov
     assert.equal(report.accuracy,1);
     assert.ok(report.missingClasses.includes('HEAD_TILT'));
 });
+
+test('Blocked audible autoplay retries muted and exposes the audio gesture control', async () => {
+    const html=readFileSync('components/student_room/frontend/index.html','utf8');
+    const code=html.match(/async function playTeacherStream\(stream\) \{[\s\S]*?\n        \}/)[0];
+    let attempts=0;
+    const context={teacherFeed:{muted:false,play:async()=>{if(++attempts===1)throw Error('NotAllowedError')}},
+        resumeLectureBtn:{hidden:true},setConnectionStatus:()=>{}};
+    vm.createContext(context);vm.runInContext(code,context);
+    const stream={};await context.playTeacherStream(stream);
+    assert.equal(context.teacherFeed.srcObject,stream);
+    assert.equal(attempts,2);assert.equal(context.teacherFeed.muted,true);
+    assert.equal(context.resumeLectureBtn.hidden,false);
+});
+test('Allowed playback keeps the lecture audio control out of the way', async () => {
+    const html=readFileSync('components/student_room/frontend/index.html','utf8');
+    const code=html.match(/async function playTeacherStream\(stream\) \{[\s\S]*?\n        \}/)[0];
+    const context={teacherFeed:{muted:false,play:async()=>{}},resumeLectureBtn:{hidden:false},setConnectionStatus:()=>{}};
+    vm.createContext(context);vm.runInContext(code,context);await context.playTeacherStream({});
+    assert.equal(context.teacherFeed.muted,false);assert.equal(context.resumeLectureBtn.hidden,true);
+});

@@ -111,4 +111,4 @@ def test_student_leave_and_csv_formula_escaping(client):
 
 def test_configuration_and_database_health(client):
     assert client.get('/health').json()=={'status':'ok'}
-    assert client.get('/config').json()['signaling']=={'host':'signal.example','port':443,'secure':True,'path':'/eduguard'}
+    assert client.get('/config').json()['signaling']=={'host':'signal.example','port':443,'secure':True,'path':'/eduguard', 'iceServers':[{'urls':'stun:stun.l.google.com:19302'}]}

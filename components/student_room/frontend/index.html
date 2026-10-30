@@ -394,7 +394,8 @@
                     <span id="teacher_stream_tag" style="color: var(--warn-color); font-size: 0.75rem;">Waiting for feed...</span>
                 </div>
                 <div class="video-box">
-                    <video id="teacher_feed" autoplay playsinline></video>
+                    <video id="teacher_feed" autoplay playsinline controls></video>
+                    <button id="resume_lecture_btn" class="ctrl-btn" hidden style="position:absolute;z-index:20;left:16px;top:16px;">▶ Play lecture / enable audio</button>
                     <div class="feed-overlay">
                         <span>👨‍🏫 Teacher Broadcast</span>
                     </div>
@@ -484,6 +485,30 @@
         const privacyCanvas = document.getElementById("privacy_canvas");
         const ctx = privacyCanvas.getContext("2d");
         const teacherFeed = document.getElementById("teacher_feed");
+        const resumeLectureBtn = document.getElementById("resume_lecture_btn");
+        resumeLectureBtn.addEventListener('click', async () => {
+            teacherFeed.muted = false;
+            try {
+                await teacherFeed.play();
+                resumeLectureBtn.hidden = true;
+            } catch (error) {
+                setConnectionStatus('alert', 'Click the lecture video play button to start playback.');
+            }
+        });
+        async function playTeacherStream(stream) {
+            teacherFeed.srcObject = stream;
+            try {
+                await teacherFeed.play();
+                resumeLectureBtn.hidden = true;
+            } catch (error) {
+                // Audio autoplay can be blocked even after joining from the parent page.
+                // Retry muted so video remains visible; audio requires a gesture in this frame.
+                teacherFeed.muted = true;
+                resumeLectureBtn.hidden = false;
+                try { await teacherFeed.play(); }
+                catch (_) { setConnectionStatus('alert', 'Click Play lecture to start the teacher video.'); }
+            }
+        }
         const teacherStreamTag = document.getElementById("teacher_stream_tag");
         const connStatusBadge = document.getElementById("conn_status_badge");
         const connStatusText = document.getElementById("conn_status_text");
@@ -846,6 +871,7 @@
         }
 
         async function initLocalStream() {
+            if (localUserMedia && virtualCanvasStream && readinessState.canvasStream === 'ready') return localUserMedia;
             if (isLocalStreamInitializing) return localStreamInitPromise;
             isLocalStreamInitializing = true;
             readinessState.webcam = 'requesting';
@@ -992,11 +1018,7 @@
                 ...signalingOptions,
                 debug: 1,
                 config: {
-                    iceServers: [
-                        { urls: "stun:stun.l.google.com:19302" },
-                        { urls: "stun:stun1.l.google.com:19302" },
-                        { urls: "stun:stun2.l.google.com:19302" }
-                    ]
+                    iceServers: signalingOptions.iceServers || [{ urls: "stun:stun.l.google.com:19302" }]
                 }
             });
 
@@ -1154,6 +1176,15 @@
                 return;
             }
 
+            const mediaConnection = activeCall.peerConnection;
+            if (mediaConnection) {
+                mediaConnection.addEventListener('connectionstatechange', () => {
+                    if (mediaConnection.connectionState === 'failed') {
+                        setConnectionStatus('alert', 'Video connection failed. This network may require a TURN relay.');
+                        teacherStreamTag.innerText = 'Network blocked media connection';
+                    }
+                });
+            }
             activeCall.on("stream", (teacherStream) => {
                 console.log("Attached incoming live teacher broadcast stream.");
                 callRetryCount = 0;
@@ -1162,8 +1193,7 @@
                     callRetryTimer = null;
                 }
                 readinessState.teacherStream = 'connected';
-                teacherFeed.srcObject = teacherStream;
-                teacherFeed.play().catch(e => console.warn("Teacher feed autoplay prevented:", e));
+                playTeacherStream(teacherStream);
                 teacherStreamTag.innerText = "Broadcasting Live";
                 teacherStreamTag.style.color = "var(--success-color)";
                 setConnectionStatus("connected", "Connected to Teacher Live");
