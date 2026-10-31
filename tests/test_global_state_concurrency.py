@@ -4,8 +4,7 @@ from core import global_state
 
 def test_global_state_concurrency_race_condition():
     """Concurrent room updates and snapshots must finish without iteration errors."""
-    state = global_state.get_shared_state()
-    state.clear()
+    global_state.reset_state()
     errors = []
     stop_event = threading.Event()
 
@@ -43,3 +42,14 @@ def test_live_student_snapshot_does_not_mutate_shared_state():
     snapshot = global_state.get_live_students("copies")
     snapshot["Alice"]["status"] = "modified"
     assert global_state.get_live_students("copies")["Alice"]["status"] == "Attentive"
+
+
+def test_same_name_distinct_participants_and_stale_cleanup():
+    global_state.reset_state()
+    global_state.update_student_presence('room','id-1',None,'Unknown',student_name='Same Name')
+    global_state.update_student_presence('room','id-2',.5,'Observed',student_name='Same Name')
+    assert len(global_state.get_live_students('room'))==2
+    snapshot=global_state.get_shared_state();snapshot.clear()
+    assert len(global_state.get_live_students('room'))==2
+    global_state.prune_stale(now=10**12)
+    assert global_state.get_shared_state()=={}

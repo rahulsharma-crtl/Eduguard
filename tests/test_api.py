@@ -155,3 +155,33 @@ def test_startup_requires_nondefault_teacher_secret(tmp_path, password):
     with pytest.raises(RuntimeError,match='TEACHER_ADMIN_PASSWORD'):
         with TestClient(create_app(settings)):
             pass
+
+
+def test_resume_does_not_duplicate_attendance_and_close_is_global(client):
+    room=create_room(client);one=join(client,room);two=join(client,room,'Other')
+    path=f"/rooms/{room['room_id']}"
+    assert client.post(path+'/heartbeat',json={},headers=auth(one)).status_code==200
+    resumed=client.post(path+'/resume',json={'resume_ticket':one['resume_ticket']})
+    assert resumed.status_code==200
+    rows=client.get(path+'/roster',headers=auth(room)).json()['students']
+    assert len(rows)==2 and {row['id'] for row in rows}=={one['session_id'],two['session_id']}
+    assert client.post(path+'/close',json={},headers=auth(room)).status_code==200
+    assert all(row['status']=='completed' and row['ended_at'] is not None for row in client.get(path+'/roster',headers=auth(room)).json()['students'])
+    assert client.post(path+'/resume',json={'resume_ticket':one['resume_ticket']}).status_code==409
+
+
+def test_late_recovery_preserves_events_without_reopening_completed_session(client):
+    room=create_room(client);one=join(client,room);path=f"/rooms/{room['room_id']}"
+    recorded=sample()
+    assert client.post(path+'/close',json={},headers=auth(room)).status_code==200
+    for _ in range(2):
+        response=client.post(path+'/recover-telemetry',json={'resume_ticket':one['resume_ticket'],'samples':[recorded]})
+        assert response.status_code==200
+        assert response.json()['rejected_event_ids']==[]
+    row=client.get(path+'/roster',headers=auth(room)).json()['students'][0]
+    assert row['status']=='completed' and row['total_samples']==1 and not row['online']
+    after=sample()
+    response=client.post(path+'/recover-telemetry',json={'resume_ticket':one['resume_ticket'],'samples':[after]})
+    assert response.json()['rejected_event_ids']==[after['sample_id']]
+    assert client.post(path+'/delete-data',json={},headers=auth(one)).status_code==200
+    assert client.post(path+'/recover-telemetry',json={'resume_ticket':one['resume_ticket'],'samples':[recorded]}).status_code==404

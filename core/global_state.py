@@ -1,79 +1,59 @@
-"""
-Global State Manager (core/global_state.py)
-
-Purpose:
-Thread-safe shared memory cache supporting live student counts, presence heartbeats, 
-and real-time score tracking across multi-tenant classrooms.
-"""
-
-from functools import lru_cache
-import time
+"""Legacy, process-local presence cache. Database state is authoritative."""
+from functools import lru_cache, wraps
 import threading
-from functools import wraps
+import time
 
-_STATE_LOCK = threading.RLock()
+_LOCK=threading.RLock()
+
 
 def synchronized(function):
     @wraps(function)
-    def guarded(*args, **kwargs):
-        with _STATE_LOCK:
-            return function(*args, **kwargs)
+    def guarded(*args,**kwargs):
+        with _LOCK:return function(*args,**kwargs)
     return guarded
 
-from typing import Dict, Any, List
 
 @lru_cache(maxsize=1)
-def get_shared_state() -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """
-    Format:
-    {
-        "room_id_1": {
-            "student_name_1": { "cei_score": 0.85, "status": "Attentive", "last_seen": 169000000.0, "joined_at": 169000000.0 },
-            ...
-        }
-    }
-    """
-    return {}
+def _state():return {}
+
 
 @synchronized
-def update_student_presence(room_id: str, student_name: str, cei_score: float, status: str):
-    """Posts a live heartbeat update for a student in a classroom."""
-    state = get_shared_state()
-    
-    if room_id not in state:
-        state[room_id] = {}
-        
-    now = time.time()
-    joined_at = state[room_id].get(student_name, {}).get("joined_at", now)
-    
-    state[room_id][student_name] = {
-        "cei_score": cei_score,
-        "status": status,
-        "last_seen": now,
-        "joined_at": joined_at
-    }
+def reset_state():_state().clear()
+
 
 @synchronized
-def get_live_students(room_id: str, timeout_seconds: int = 6) -> Dict[str, Dict[str, Any]]:
-    """Returns students who sent a heartbeat within the last N seconds (Currently Online)."""
-    state = get_shared_state()
-    if room_id not in state:
-        return {}
-        
-    now = time.time()
-    return {
-        name: dict(data) for name, data in state[room_id].items()
-        if now - data["last_seen"] <= timeout_seconds
-    }
+def get_shared_state():
+    """Return a detached snapshot; callers cannot mutate the synchronized cache."""
+    return {room:{key:dict(value) for key,value in people.items()} for room,people in _state().items()}
+
 
 @synchronized
-def get_total_joined_students(room_id: str) -> List[Dict[str, Any]]:
-    """Returns all students who have logged into this room session."""
-    state = get_shared_state()
-    if room_id not in state:
-        return []
-        
-    return [
-        {"student_name": name, "joined_at": data["joined_at"], "last_seen": data["last_seen"], "last_score": data["cei_score"]}
-        for name, data in state[room_id].items()
-    ]
+def prune_stale(max_age_seconds=3600,now=None):
+    now=time.time() if now is None else now
+    for room in list(_state()):
+        for participant in list(_state()[room]):
+            if now-_state()[room][participant]['last_seen']>max_age_seconds:del _state()[room][participant]
+        if not _state()[room]:del _state()[room]
+
+
+@synchronized
+def update_student_presence(room_id,participant_id,cei_score,status,*,student_name=None):
+    """participant_id must be a stable issued ID, never a display-name lookup."""
+    if not participant_id:raise ValueError('Stable participant identifier required')
+    people=_state().setdefault(room_id,{})
+    now=time.time();joined=people.get(participant_id,{}).get('joined_at',now)
+    people[participant_id]={'participant_id':participant_id,'student_name':student_name or participant_id,
+        'cei_score':cei_score,'status':status,'last_seen':now,'joined_at':joined}
+
+
+@synchronized
+def get_live_students(room_id,timeout_seconds=6):
+    prune_stale()
+    now=time.time()
+    return {key:dict(value) for key,value in _state().get(room_id,{}).items() if now-value['last_seen']<=timeout_seconds}
+
+
+@synchronized
+def get_total_joined_students(room_id):
+    prune_stale()
+    return [dict(value,last_score=value['cei_score']) for value in _state().get(room_id,{}).values()]

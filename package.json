@@ -1,7 +1,7 @@
 {
   "name": "eduguard-classroom",
   "version": "1.0.0",
-  "description": "EduGuard privacy classroom \u00e2\u20ac\u201d React/Vite, FastAPI and WebRTC",
+  "description": "EduGuard privacy classroom - React/Vite, FastAPI and WebRTC",
   "scripts": {
     "test:js": "node --test tests/js/*.test.mjs",
     "test:py": "python -m pytest -q",
@@ -17,10 +17,12 @@
     "dev": "node scripts/prepare_web.mjs && vite",
     "build": "npm run build:engagement && node scripts/prepare_web.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test:media": "npm run build && node --test tests/browser/webrtc.test.mjs"
+    "test:media": "npm run build && node --test tests/browser/webrtc.test.mjs",
+    "test:browser": "node scripts/test_browser.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
+    "fake-indexeddb": "6.2.7",
     "playwright": "1.64.1",
     "vite": "8.3.5"
   },

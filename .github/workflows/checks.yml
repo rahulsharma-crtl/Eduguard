@@ -17,5 +17,7 @@ jobs:
       - run: npm run lint:js
       - run: python -m pytest -q
       - run: npm run build
+        env:
+          VITE_API_URL: http://localhost:8000
       - run: npx playwright install --with-deps chromium
-      - run: node --test tests/browser/webrtc.test.mjs
+      - run: node --test --test-concurrency=1 tests/browser/*.test.mjs

@@ -45,6 +45,7 @@ for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lect
         browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),
             args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required']});
         const context=await browser.newContext({permissions:['camera','microphone']});
+        await context.route(/fonts\.(googleapis|gstatic)\.com/,route=>route.abort());
         await context.addInitScript(() => {
             window.__mediaAudit={raw:[],canvas:[],connections:[],captures:[]};
             navigator.mediaDevices.getUserMedia=async constraints=>{
@@ -78,10 +79,10 @@ for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lect
             page.on('console',message=>logs.push(message.text()));
             page.on('pageerror',error=>logs.push(error.message));
         }
-        await teacher.goto(base+'/harness?role=teacher');
+        await teacher.goto(base+'/harness?role=teacher',{waitUntil:'domcontentloaded'});
         const teacherFrame=await teacher.waitForSelector('iframe').then(handle=>handle.contentFrame());
         await teacherFrame.waitForFunction(()=>document.getElementById('teacher_video')?.videoWidth>0,{},{timeout:45000});
-        await student.goto(base+'/harness?role=student');
+        await student.goto(base+'/harness?role=student',{waitUntil:'domcontentloaded'});
         const studentFrame=await student.waitForSelector('iframe').then(handle=>handle.contentFrame());
         try{
             await studentFrame.waitForFunction(()=>document.getElementById('teacher_feed')?.videoWidth>0,{},{timeout:45000});

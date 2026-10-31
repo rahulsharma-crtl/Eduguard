@@ -33,12 +33,14 @@ def test_empty_telemetry_is_not_scored_as_attentive(temp_db):
     """An empty session is explicitly unscored rather than assigned perfect engagement."""
     session_id = temp_db.create_session("room_ghost", "GhostStudent", time.time())
     assert session_id is not None
-    # No telemetry batch inserted
+    # A caller-supplied perfect average must not replace missing observations.
+    temp_db.end_session(session_id,time.time(),1.0)
+    assert temp_db.get_all_sessions('room_ghost')[0]['avg_cei'] is None
 
     ledger = temp_db.get_room_session_summary_ledger("room_ghost")
     assert len(ledger) == 1
     assert ledger[0]["student_name"] == "GhostStudent"
-    assert ledger[0]["avg_cei_pct"] == 0.0
+    assert ledger[0]["avg_cei_pct"] is None
     assert ledger[0]["primary_state"] == "No Telemetry Recorded"
 
 
@@ -79,6 +81,9 @@ def test_abandoned_session_recovered_from_persisted_samples(temp_db):
     temp_db.insert_telemetry_batch(session, [
         {"timestamp": start + 1, "cei": 0.5, "attentiveness": 0.5, "distraction": 0, "status": "Attentive"},
         {"timestamp": start + 2, "cei": 1, "attentiveness": 1, "distraction": 0, "status": "Attentive"}])
+    with temp_db._get_connection() as conn:
+        conn.execute("UPDATE sessions SET last_seen=? WHERE session_id=?",(start+2,session))
+        conn.execute("UPDATE legacy_attendance_intervals SET started_at=?,last_seen=? WHERE session_id=?",(start,start+2,session))
     temp_db.close_stale_sessions()
     record = temp_db.get_all_sessions("recovery")[0]
     assert record["end_time"] == start + 2
@@ -113,3 +118,40 @@ def test_retried_sample_is_idempotent(temp_db):
     temp_db.insert_telemetry_batch(session, [record])
     temp_db.insert_telemetry_batch(session, [record, record])
     assert len(temp_db.get_telemetry(session)) == 1
+
+
+def test_legacy_stable_participant_names_and_room_finalization(temp_db):
+    one=temp_db.create_session('room','Same Name',time.time(),participant_id='id-1')
+    assert temp_db.create_session('room','Same Name',time.time(),participant_id='id-1')==one
+    two=temp_db.create_session('room','Same Name',time.time(),participant_id='id-2')
+    assert one!=two
+    assert len(temp_db.get_room_session_summary_ledger('room'))==2
+    temp_db.finalize_room('room')
+    with pytest.raises(ValueError):
+        temp_db.insert_telemetry_batch(one,[{'timestamp':time.time(),'cei':1,'attentiveness':1,'distraction':0,'status':'Attentive'}])
+    temp_db.touch_session(one)
+    assert all(row['end_time'] is not None for row in temp_db.get_all_sessions('room'))
+
+
+def test_legacy_migration_preserves_historical_rows_and_missing_scores(tmp_path):
+    import sqlite3
+    path=tmp_path/'historical.db'
+    with sqlite3.connect(path) as conn:
+        conn.executescript("""
+        CREATE TABLE sessions(session_id INTEGER PRIMARY KEY,room_id TEXT,student_name TEXT,start_time REAL,end_time REAL,avg_cei REAL);
+        CREATE TABLE telemetry(id INTEGER PRIMARY KEY,session_id INTEGER,timestamp REAL,cei REAL,attentiveness REAL,distraction REAL,status TEXT);
+        INSERT INTO sessions VALUES(1,'history','Same Name',1000,1100,0.62);
+        INSERT INTO sessions VALUES(2,'history','Same Name',1200,1300,1.0);
+        INSERT INTO telemetry VALUES(1,1,1050,0.62,0.5,0.2,'Observed');
+        """)
+    db=DatabaseManager(str(path))
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT session_id,start_time,end_time,avg_cei FROM sessions ORDER BY session_id').fetchall()==[(1,1000,1100,.62),(2,1200,1300,1)]
+        assert conn.execute('SELECT timestamp,cei FROM telemetry').fetchall()==[(1050,.62)]
+    rows=db.get_room_session_summary_ledger('history')
+    assert len(rows)==2
+    assert sorted(row['avg_cei_pct'] for row in rows if row['avg_cei_pct'] is not None)==[62]
+    assert sum(row['avg_cei_pct'] is None for row in rows)==1
+    assert all(row['duration_seconds']==0 and not row['attendance_verified'] for row in rows)
+    DatabaseManager(str(path))
+    assert len(db.get_all_sessions('history'))==2

@@ -23,7 +23,7 @@ flowchart LR
   G -->|Mesh mode only| T[Teacher browser]
   K --> Q[Allowlisted derived telemetry]
   Q -->|WebRTC data channel| T
-  Q --> O[Tab session-storage retry queue]
+  Q --> O[IndexedDB retry queue]
   O -->|HTTPS signed student token| A[FastAPI]
   A --> D[PostgreSQL or local SQLite]
   D -->|Teacher room-scoped authorization| R[Roster and CSV]
@@ -40,11 +40,11 @@ flowchart LR
 | Mesh | Canvas drawing of landmarks, captureStream video; only mesh mode may attach allowlisted canvas track IDs | No application recording; recipients can independently record |
 | Landmarks and precise geometry | Generated in browser; no landmark arrays accepted by API | No application database storage |
 | Head pose, eye-closure flags, audio energy | Local estimates; derived observations can reach teacher over the data channel | API does not accept these extra fields; no raw audio arrays |
-| Display alias, session/room IDs, timestamps, scalar scores, state, missing-data flag | Allowlisted HTTP telemetry and authorized roster/CSV | Database; pending derived samples in tab sessionStorage |
+| Display alias, session/room IDs, timestamps, scalar scores, state, missing-data flag | Allowlisted HTTP telemetry and authorized roster/CSV | Database; pending derived samples in IndexedDB |
 | Consent time and chosen mode | Recorded at admission; signed student token also includes consent and mode | Session database row |
 | Original student microphone samples | Local Web Audio only after separate opt-in; no MediaRecorder or transcription | Transient browser audio buffers only |
 | Teacher media | Intentionally transmitted to admitted room peers | Not recorded by app |
-| Admission, session and room capabilities | Signed API tokens in Authorization headers; invitation in URL fragment, not query; pseudonymous random peer IDs | Tab sessionStorage and user-shared invitation links; signing secret stays server-side |
+| Admission, session and room capabilities | Signed API tokens in Authorization headers; invitation in URL fragment, not query; pseudonymous random peer IDs | Expiring browser localStorage credentials and user-shared invitation links; signing secret stays server-side |
 | Signaling, STUN, TURN | SDP, ICE, IP and connection metadata reach configured infrastructure; TURN may relay encrypted WebRTC media | Infrastructure logs/retention are operator-controlled |
 | CDN/font/hosting requests | IP, user agent, timing and asset paths reach providers; MediaPipe models/WASM are downloaded, not camera frames | Third-party access logs, outside application deletion control |
 
@@ -65,9 +65,9 @@ The retired Streamlit runtime is not used. Its replacement postMessage bridge re
 
 ## Retention and deletion
 
-RETENTION_DAYS defaults to 7, minimum 1. A server background cleanup checks expired classrooms and deletes their samples, sessions and room every 60 seconds while the process is running; sleeping/offline hosts clean up after resumption. Expiry is measured from room creation. This is not a guaranteed wall-clock deletion deadline while a host is offline. Configure a monitored scheduled database cleanup for strict operational deadlines.
+RETENTION_DAYS defaults to 7, minimum 1. A server background cleanup checks expired classrooms and deletes their samples, sessions and room every five seconds while the process is running; sleeping/offline hosts clean up after resumption. Expiry is measured from room creation. This is not a guaranteed wall-clock deletion deadline while a host is offline. Configure a monitored scheduled database cleanup for strict operational deadlines.
 
-Students can withdraw and delete their own session and samples. Teachers can end and delete the whole room. Deletion revokes subsequent API access for removed sessions/rooms and removes local session/outbox keys in that browser. It does not delete third-party logs, exports, screenshots, recipient recordings, database backups, or old legacy eduguard_telemetry.db files. Operators must separately manage those copies and enforce backup expiry. API deletion and retention perform ordered transactional deletes; SQLite foreign keys are enabled and PostgreSQL constraints apply. Local pending samples persist until delivered or the tab data is cleared; closing a tab may discard unsent observations.
+Students can withdraw and delete their own session and samples. Teachers can end and delete the whole room. Deletion revokes subsequent API access for removed sessions/rooms and removes local session/outbox keys in that browser. It does not delete third-party logs, exports, screenshots, recipient recordings, database backups, or old legacy eduguard_telemetry.db files. Operators must separately manage those copies and enforce backup expiry. API deletion and retention perform ordered transactional deletes; SQLite foreign keys are enabled and PostgreSQL constraints apply. Local pending samples persist in IndexedDB until delivery, explicit deletion, browser clearing/eviction or expiry; cleanup runs on reopening the application.
 
 ## Validation and limitations
 
@@ -76,3 +76,5 @@ Browser tests instrument every getUserMedia call, canvas captureStream, and RTCP
 API tests cover consent/invitation enforcement, cross-room/role denial, deletion/revocation, retention and rejection of raw extra payload fields. Synthetic browser cameras exercise media without collecting people’s biometrics. Real-device, corporate-firewall and production deployment behavior must still be verified. No real-world anonymity, biometric safety, consent validity, fairness, or regulatory compliance certification is claimed.
 
 Deployment requires an HTTPS frontend/API/signaling service, exact ALLOWED_ORIGINS, a stable private AUTH_SIGNING_KEY, a configured teacher secret, and a PostgreSQL provider with appropriate retention. Do not use a free expiring database for ongoing retention without an explicit migration/backup plan. Treat teacher CSV exports as identifiable sensitive records.
+
+Lifecycle update: browser session/resume credentials now persist with expiry in localStorage to support close/crash recovery. IndexedDB stores individual pending events transactionally. Same-origin scripts and users of a shared browser can access this data; clear it through withdrawal/deletion or browser settings. Signed recovery can upload only retained participant data before the session cutoff and never reopens a completed classroom. Migration preserves existing historical rows, while the existing configured retention policy remains separately in force.

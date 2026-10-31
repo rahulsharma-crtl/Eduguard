@@ -40,7 +40,7 @@ Use the root `render.yaml` Blueprint. It creates two free web services and a fre
 ## Behavior and security
 
 - Teacher passwords are checked server-side. Signed, room-scoped tokens expire after 12 hours; student tokens cannot read rosters/reports or control other rooms. Signed expiring invitation links grant student access only after explicit consent; this is not LMS identity verification.
-- Derived telemetry is queued in the current browser tab's session storage before HTTP delivery. API sample IDs make retries idempotent; failed uploads retry while the tab remains open or after reloading it. Closing the tab permanently can lose samples that never reached the API. Stored data uses PostgreSQL in the supplied cloud setup.
+- Derived telemetry is committed to IndexedDB before HTTP delivery. API sample IDs make retries idempotent; failed uploads retry while the tab remains open or after reloading it. Committed pending events survive tab closure and recover when that participant returns; browser eviction/clearing or expired recovery credentials can still prevent recovery. Stored data uses PostgreSQL in the supplied cloud setup.
 - Ending a classroom stops ingestion and causes student media to shut down on their next status poll (within about five seconds when online). Connection loss cannot guarantee immediate remote shutdown.
 - Reports and session averages use all stored observations. Low-quality observations remain unknown and are excluded from scoring averages. Microphone muting and head tilt are not engagement penalties.
 - Camera calibration is available in the student panel. esbuild generates the browser engagement/roster modules from core sources.
@@ -67,3 +67,9 @@ Run `npm run test:media` for a real two-page WebRTC smoke test using synthetic c
 ## Privacy hardening
 
 See [PRIVACY.md](PRIVACY.md) for the audited flow, threat model, data inventory, retention and limits. Start a new classroom after this security update: old invitation links and non-consented student tokens are no longer accepted. Choose telemetry-only or mesh and explicitly consent before joining. Students can withdraw/delete their data; teachers can end/delete the classroom. RETENTION_DAYS defaults to 7; expired rooms are removed by the running server. Configure a teacher password of at least 12 characters (admin123 is rejected). Microphone audio is never transmitted by the current student client.
+
+## Session lifecycle
+
+See [SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md) for durable queues, signed reconnects, five-second heartbeats, stale closure, UTC timestamps, attendance coverage, late recovery, and additive migration details. Browser credentials now persist locally with expiry to recover after tab/browser closure. Use withdrawal/deletion or clear local data on shared computers. Back up databases and run `python -m scripts.migrate_db` with one process before a multi-worker rollout. Migrations retain existing rows; the separately configured retention policy still applies when the API runs.
+
+Run `npm run test:browser` for both synthetic-media privacy tests and real frontend/API offline-close-reopen recovery. This builds a test-only frontend with a localhost API address; production Vercel builds must use the configured deployment API URL. Install Playwright Chromium first if no supported local Chrome is available.

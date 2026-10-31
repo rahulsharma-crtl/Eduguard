@@ -22,7 +22,7 @@ def generate_csv_report(db: DatabaseManager, session_id: int) -> Optional[str]:
             return None
             
         df = pd.DataFrame(telemetry)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
         
         df['cei_percent'] = (df['cei'] * 100).round(1).astype(str) + '%'
         df['attentiveness_percent'] = (df['attentiveness'] * 100).round(1).astype(str) + '%'

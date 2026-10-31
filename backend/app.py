@@ -12,6 +12,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from urllib.parse import urlparse
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -102,10 +103,11 @@ def create_app(settings=None):
         async def purge_loop():
             while True:
                 try:
+                    await asyncio.to_thread(store.close_stale)
                     await asyncio.to_thread(store.purge, max(1, settings.retention_days))
                 except Exception:
                     logging.warning("Retention cleanup failed; retrying without logging record contents")
-                await asyncio.sleep(60)
+                await asyncio.sleep(5)
         task = asyncio.create_task(purge_loop())
         try:
             yield
@@ -214,21 +216,57 @@ def create_app(settings=None):
         name = data.name.strip()
         if not name:
             raise HTTPException(422, 'Display alias is required')
-        now = time.time()
-        session_id = str(uuid.uuid4())
-        with store.engine.begin() as conn:
-            room = conn.execute(select(store.rooms).where(store.rooms.c.id == room_id).with_for_update()).mappings().first()
-            if not room:
-                raise HTTPException(404, 'Classroom not found')
-            if room['closed']:
-                raise HTTPException(409, 'Classroom has ended')
-            # Client IDs label join attempts and never grant access to a session.
-            conn.execute(store.sessions.insert().values(id=session_id, room_id=room_id,
-                client_id=str(data.client_id), name=name, started_at=now, last_seen=now, consent_at=now, privacy_mode=data.privacy_mode))
+        session_id=store.admit(room_id,str(data.client_id),name,data.privacy_mode)
+        if not session_id:
+            raise HTTPException(409, 'Classroom missing or ended')
         return {'room_id': room_id, 'name': name, 'role': 'student', 'session_id': session_id,
-                'privacy_mode': data.privacy_mode,
+                'privacy_mode': data.privacy_mode, 'server_utc':time.time(),
+                'resume_ticket': signer.dumps({'role':'resume','room_id':room_id,'session_id':session_id,'privacy_mode':data.privacy_mode,'consent':True}),
                 'peer_room': hmac.new(settings.signing_key.encode(), room_id.encode(), 'sha256').hexdigest(),
                 'token': signer.dumps({'role': 'student', 'room_id': room_id, 'session_id': session_id, 'privacy_mode':data.privacy_mode, 'consent':True})}
+
+    class Resume(BaseModel):
+        resume_ticket: str = Field(min_length=16,max_length=2048)
+
+    @app.post('/rooms/{room_id}/resume')
+    def resume(room_id: str, data: Resume):
+        try:
+            token=signer.loads(data.resume_ticket,max_age=max(1,settings.retention_days)*86400)
+        except (BadSignature,SignatureExpired):
+            raise HTTPException(401,'Invalid or expired resume ticket')
+        if token.get('role')!='resume' or token.get('room_id')!=room_id or token.get('consent') is not True:
+            raise HTTPException(401,'Invalid resume scope')
+        if not store.heartbeat(room_id,token['session_id']):
+            raise HTTPException(409,'Classroom or participant is no longer resumable')
+        token['role']='student'
+        return {'token':signer.dumps(token),'server_utc':time.time()}
+
+    @app.post('/rooms/{room_id}/heartbeat')
+    def heartbeat(room_id: str, token=Depends(authorize)):
+        if token['role']!='student': raise HTTPException(403,'Student required')
+        if not store.heartbeat(room_id,token['session_id']): raise HTTPException(409,'Classroom ended')
+        return {'status':'active','server_utc':time.time()}
+
+    class Recovery(Batch):
+        resume_ticket: str = Field(min_length=16,max_length=2048)
+
+    @app.post('/rooms/{room_id}/recover-telemetry')
+    def recover_telemetry(room_id: str, data: Recovery):
+        try:
+            token=signer.loads(data.resume_ticket,max_age=max(1,settings.retention_days)*86400)
+        except (BadSignature,SignatureExpired):
+            raise HTTPException(401,'Invalid recovery ticket')
+        if token.get('role')!='resume' or token.get('room_id')!=room_id or token.get('consent') is not True:
+            raise HTTPException(401,'Invalid recovery scope')
+        outcome=store.insert_samples(room_id,token['session_id'],data.samples,recovery=True)
+        if outcome is False:raise HTTPException(404,'Session deleted or expired')
+        return outcome
+
+    @app.post('/rooms/{room_id}/resume-ticket')
+    def resume_ticket(room_id: str, token=Depends(authorize)):
+        if token['role']!='student':raise HTTPException(403,'Student required')
+        resume={**token,'role':'resume'}
+        return {'resume_ticket':signer.dumps(resume)}
 
     @app.post('/rooms/{room_id}/telemetry')
     def telemetry(room_id: str, data: Batch, token=Depends(authorize)):
@@ -246,8 +284,7 @@ def create_app(settings=None):
     def leave(room_id: str, token=Depends(authorize)):
         if token.get('role') != 'student':
             raise HTTPException(403, 'Student access required')
-        with store.engine.begin() as conn:
-            conn.execute(update(store.sessions).where(store.sessions.c.id == token['session_id']).values(ended_at=time.time()))
+        store.finish(room_id,token['session_id'])
         return {'ok': True}
 
     @app.get('/rooms/{room_id}/roster')
@@ -256,11 +293,7 @@ def create_app(settings=None):
 
     @app.post('/rooms/{room_id}/close')
     def close_room(room_id: str, token=Depends(teacher)):
-        with store.engine.begin() as conn:
-            conn.execute(select(store.rooms).where(store.rooms.c.id == room_id).with_for_update())
-            conn.execute(update(store.rooms).where(store.rooms.c.id == room_id).values(closed=True))
-            conn.execute(update(store.sessions).where(store.sessions.c.room_id == room_id,
-                         store.sessions.c.ended_at.is_(None)).values(ended_at=time.time()))
+        store.finish(room_id)
         return {'ok': True}
 
     @app.post('/rooms/{room_id}/delete-data')
@@ -271,13 +304,18 @@ def create_app(settings=None):
     @app.get('/rooms/{room_id}/report.csv')
     def report(room_id: str, token=Depends(teacher)):
         output = io.StringIO()
-        fields = ['session_id', 'student_name', 'timestamp', 'cei', 'attentiveness', 'distraction', 'status', 'is_unknown']
+        fields = ['session_id', 'sample_id', 'student_name', 'timestamp', 'timestamp_utc', 'received_at_utc', 'cei', 'attentiveness', 'distraction', 'status', 'is_unknown','session_status','validated_presence_seconds','observed_seconds','unobserved_seconds','disconnected_seconds']
+        summaries={row['id']:row for row in store.roster(room_id)}
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         with store.engine.connect() as conn:
             query = select(store.samples, store.sessions.c.name).join(store.sessions).where(store.sessions.c.room_id == room_id).order_by(store.samples.c.timestamp)
             for row in conn.execute(query).mappings():
-                record = {key: row[key] for key in fields if key != 'student_name'}
+                record = {key: row[key] for key in ['session_id','sample_id','timestamp','cei','attentiveness','distraction','status','is_unknown']}
+                record['timestamp_utc']=datetime.fromtimestamp(row['timestamp'],timezone.utc).isoformat()
+                record['received_at_utc']=datetime.fromtimestamp(row['received_at'],timezone.utc).isoformat() if row['received_at'] is not None else ''
+                summary=summaries[row['session_id']]
+                record.update(session_status=summary['status'],validated_presence_seconds=summary['duration_seconds'],observed_seconds=summary['observed_seconds'],unobserved_seconds=summary['unobserved_seconds'],disconnected_seconds=summary['disconnected_seconds'])
                 # Prevent spreadsheet formula execution from user-controlled text.
                 record['student_name'] = ("'" if row['name'].lstrip().startswith(('=', '+', '-', '@')) else '') + row['name']
                 record['status'] = ("'" if row['status'].lstrip().startswith(('=', '+', '-', '@')) else '') + row['status']
