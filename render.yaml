@@ -23,6 +23,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.11"
+      - key: RETENTION_DAYS
+        value: "7"
       - key: AUTH_SIGNING_KEY
         generateValue: true
       - key: TEACHER_ADMIN_PASSWORD

@@ -20,7 +20,7 @@ def create_room(client, name='Math'):
 
 
 def join(client, room, name='Alice'):
-    response = client.post(f"/rooms/{room['room_id']}/join", json={'name': name, 'client_id': str(uuid.uuid4())})
+    response = client.post(f"/rooms/{room['room_id']}/join", json={'name': name, 'client_id': str(uuid.uuid4()), 'invitation':room['invitation'], 'consent':True, 'privacy_mode':'telemetry-only'})
     assert response.status_code == 200
     return response.json()
 
@@ -50,9 +50,9 @@ def test_full_classroom_lifecycle_and_idempotent_telemetry(client):
     assert response.status_code == 200
     assert 'Alice' in response.text and 'Mic Muted' in response.text
     assert client.post(path+'/close',json={},headers=auth(teacher)).status_code == 200
-    assert client.get(path).json()['closed'] is True
-    assert client.post(path+'/telemetry',json=payload,headers=auth(student)).status_code == 409
-    assert client.post(path+'/join',json={'name':'Bob','client_id':str(uuid.uuid4())}).status_code == 409
+    assert client.get(path,headers=auth(student)).json()['closed'] is True
+    assert client.post(path+'/telemetry',json=payload,headers=auth(student)).status_code == 403
+    assert client.post(path+'/join',json={'name':'Bob','client_id':str(uuid.uuid4()),'invitation':teacher['invitation'],'consent':True,'privacy_mode':'mesh'}).status_code == 409
 
 
 def test_role_room_and_signature_authorization(client):
@@ -112,3 +112,46 @@ def test_student_leave_and_csv_formula_escaping(client):
 def test_configuration_and_database_health(client):
     assert client.get('/health').json()=={'status':'ok'}
     assert client.get('/config').json()['signaling']=={'host':'signal.example','port':443,'secure':True,'path':'/eduguard', 'iceServers':[{'urls':'stun:stun.l.google.com:19302'}]}
+
+
+def test_admission_consent_and_invitation_are_required(client):
+    room=create_room(client)
+    payload={'name':'Alias','client_id':str(uuid.uuid4()),'privacy_mode':'mesh','consent':True,'invitation':room['invitation']}
+    assert client.post(f"/rooms/{room['room_id']}/join",json={**payload,'consent':False}).status_code==422
+    other=create_room(client)
+    assert client.post(f"/rooms/{other['room_id']}/join",json=payload).status_code==403
+    assert client.post(f"/rooms/{room['room_id']}/delete-data",json={},headers={'Authorization':'Bearer '+room['invitation']}).status_code==401
+
+
+def test_deleted_session_cannot_upload_and_cannot_erase_peers(client):
+    room=create_room(client);one=join(client,room);two=join(client,room,'Other')
+    path=f"/rooms/{room['room_id']}"
+    assert client.post(path+'/delete-data',json={},headers=auth(one)).status_code==200
+    assert client.post(path+'/telemetry',json={'samples':[sample()]},headers=auth(one)).status_code==401
+    rows=client.get(path+'/roster',headers=auth(room)).json()['students']
+    assert [row['id'] for row in rows]==[two['session_id']]
+    assert client.post(path+'/delete-data',json={},headers=auth(room)).status_code==200
+    assert client.get(path+'/roster',headers=auth(room)).status_code==401
+
+
+def test_retention_purges_expired_room_and_children(client):
+    from sqlalchemy import update
+    room=create_room(client);student=join(client,room)
+    store=client.app.state.store
+    with store.engine.begin() as conn:
+        conn.execute(update(store.rooms).where(store.rooms.c.id==room['room_id']).values(created_at=0))
+    store.purge(7)
+    assert store.room(room['room_id']) is None
+
+
+def test_raw_payload_fields_are_rejected(client):
+    room=create_room(client);student=join(client,room)
+    assert client.post(f"/rooms/{room['room_id']}/telemetry",headers=auth(student),json={'samples':[{**sample(),'landmarks':[1,2,3]}]}).status_code==422
+
+
+@pytest.mark.parametrize('password', ['', 'admin123'])
+def test_startup_requires_nondefault_teacher_secret(tmp_path, password):
+    settings=Settings(f"sqlite:///{tmp_path/'missing-secret.db'}",'s'*48,password,[],'https://signal.example')
+    with pytest.raises(RuntimeError,match='TEACHER_ADMIN_PASSWORD'):
+        with TestClient(create_app(settings)):
+            pass

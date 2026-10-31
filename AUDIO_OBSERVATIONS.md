@@ -1,6 +1,6 @@
 # Optional audio observations
 
-Analysis is unchecked by default. Opting in resumes a local Web Audio analyser; opting out suspends it and stops reading samples. Time-domain RMS reports low/elevated energy, never speech or misconduct. No recorder, transcription, audio upload or audio-sample persistence is added. Existing live microphone transmission to the teacher while unmuted is independent of analysis consent.
+Analysis is unchecked by default. Opting in resumes a local Web Audio analyser; opting out suspends it and stops reading samples. Time-domain RMS reports low/elevated energy, never speech or misconduct. No recorder, transcription, audio upload or audio-sample persistence is added. Student microphone transmission is disabled in both privacy modes. Optional analysis uses a separately requested local-only microphone track.
 
 Microphone available/muted/unavailable, lecturer muted/audible, analysis enabled/disabled, energy and unknown vocal activity are distinct. Missing or corrupt data remains unknown. The multimodal payload includes face presence, prolonged eye closure, head orientation, optional audio, uncertainty and an explicit non-inference statement. Head orientation and audio do not automatically reduce the default heuristic score. Visual scores remain estimates, not proof of attention.
 

@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root=path.resolve('dist');
 async function reservePort(){const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port;await new Promise(resolve=>server.close(resolve));return port;}
-test('A student receives decoded teacher video frames through real PeerJS media calls', {timeout:120000}, async()=>{
+for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lecture with verified private outbound tracks: ${privacyMode}`, {timeout:120000}, async()=>{
     const signalPort=await reservePort();
     const signal=spawn(process.execPath,['signaling/server.cjs'],{env:{...process.env,PORT:String(signalPort)},stdio:'pipe'});
     const room='media-test-'+crypto.randomUUID();
@@ -20,7 +20,7 @@ test('A student receives decoded teacher video frames through real PeerJS media 
             if(url.pathname==='/harness'){
                 const role=url.searchParams.get('role')==='teacher'?'teacher':'student';
                 res.setHeader('Content-Type','text/html');
-                res.end(`<!doctype html><iframe id="room" src="/classroom/${role}/index.html" allow="camera; microphone; autoplay" style="width:100%;height:100vh"></iframe><script>window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='eduguard:ready')document.getElementById('room').contentWindow.postMessage({type:'eduguard:init',args:{roomId:${JSON.stringify(room)},studentName:'Synthetic Student',signaling:${JSON.stringify(options)}}},location.origin)})</script>`);
+                res.end(`<!doctype html><iframe id="room" src="/classroom/${role}/index.html" allow="camera; microphone; autoplay" style="width:100%;height:100vh"></iframe><script>window.addEventListener('message',e=>{if(e.origin===location.origin&&e.data?.type==='eduguard:ready')document.getElementById('room').contentWindow.postMessage({type:'eduguard:init',args:{roomId:${JSON.stringify(room)},studentName:'Synthetic Student',consent:true,privacyMode:${JSON.stringify(privacyMode)},signaling:${JSON.stringify(options)}}},location.origin)})</script>`);
                 return;
             }
             const file=path.resolve(root,'.'+decodeURIComponent(url.pathname));
@@ -45,7 +45,34 @@ test('A student receives decoded teacher video frames through real PeerJS media 
         browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),
             args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required']});
         const context=await browser.newContext({permissions:['camera','microphone']});
+        await context.addInitScript(() => {
+            window.__mediaAudit={raw:[],canvas:[],connections:[],captures:[]};
+            navigator.mediaDevices.getUserMedia=async constraints=>{
+                window.__mediaAudit.captures.push(constraints);
+                const stream=new MediaStream();
+                if(constraints.video){
+                    const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;
+                    const ctx=canvas.getContext('2d');let frame=0;
+                    const draw=()=>{ctx.fillStyle=frame++%2?'#2580a0':'#a08025';ctx.fillRect(0,0,640,480)};
+                    draw();setInterval(draw,40);
+                    canvas.captureStream(25).getVideoTracks().forEach(track=>stream.addTrack(track));
+                }
+                if(constraints.audio){
+                    const audio=new AudioContext();const destination=audio.createMediaStreamDestination();
+                    const oscillator=audio.createOscillator();const gain=audio.createGain();gain.gain.value=0;
+                    oscillator.connect(gain).connect(destination);oscillator.start();
+                    destination.stream.getAudioTracks().forEach(track=>stream.addTrack(track));
+                }
+                window.__mediaAudit.raw.push(...stream.getVideoTracks().map(t=>t.id));return stream;
+            };
+            const canvas=HTMLCanvasElement.prototype.captureStream;
+            HTMLCanvasElement.prototype.captureStream=function(...args){const stream=canvas.apply(this,args);window.__mediaAudit.canvas.push(...stream.getVideoTracks().map(t=>t.id));return stream};
+            const Native=window.RTCPeerConnection;
+            window.RTCPeerConnection=class extends Native{constructor(...args){super(...args);window.__mediaAudit.connections.push(this)}};
+        });
         const teacher=await context.newPage(),student=await context.newPage();
+        const uploads=[];
+        student.on('request',request=>{if(['POST','PUT','PATCH'].includes(request.method()))uploads.push(request.url())});
         const logs=[];
         for(const page of [teacher,student]){
             page.on('console',message=>logs.push(message.text()));
@@ -60,7 +87,17 @@ test('A student receives decoded teacher video frames through real PeerJS media 
             await studentFrame.waitForFunction(()=>document.getElementById('teacher_feed')?.videoWidth>0,{},{timeout:45000});
             const media=await studentFrame.evaluate(()=>{const video=document.getElementById('teacher_feed');return {width:video.videoWidth,height:video.videoHeight,state:video.readyState,tracks:video.srcObject?.getVideoTracks().length}});
             assert.ok(media.width>0&&media.height>0&&media.state>=2&&media.tracks>0,JSON.stringify(media));
-            console.log('Decoded student lecture:',media);
+            await studentFrame.locator('input[type="checkbox"]').check();
+            await studentFrame.waitForFunction(()=>window.__mediaAudit.captures.some(c=>c.audio===true&&c.video===false));
+            const audit=await studentFrame.evaluate(()=>({raw:window.__mediaAudit.raw,canvas:window.__mediaAudit.canvas,
+                sent:window.__mediaAudit.connections.flatMap(pc=>pc.getSenders().map(s=>s.track).filter(Boolean).map(t=>({id:t.id,kind:t.kind})))}));
+            assert.ok(audit.sent.every(t=>t.kind!=='video'||(!audit.raw.includes(t.id)&&audit.canvas.includes(t.id))));
+            if(privacyMode==='telemetry-only')assert.equal(audit.sent.length,0);
+            else assert.ok(audit.sent.some(t=>t.kind==='video'));
+            await studentFrame.locator('input[type="checkbox"]').uncheck();
+            assert.ok(audit.sent.every(t=>t.kind!=='audio'));
+            assert.deepEqual(uploads,[], 'No HTTP media uploads from standalone student capture');
+            console.log('Verified media tracks:',{mode:privacyMode,decoded:media.width,sent:audit.sent});
         }catch(error){throw Error(error.message+'\nBrowser diagnostics:\n'+logs.join('\n'))}
     }finally{
         if(browser)await browser.close();

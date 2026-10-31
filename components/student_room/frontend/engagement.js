@@ -26,6 +26,7 @@ var EduGuardEngagement = (() => {
     EngagementEngine: () => EngagementEngine,
     LANDMARK_INDICES: () => LANDMARK_INDICES,
     applyTimeAwareEMA: () => applyTimeAwareEMA,
+    assertPrivateStream: () => assertPrivateStream,
     assessFacePresenceQuality: () => assessFacePresenceQuality,
     assessLandmarkConfidence: () => assessLandmarkConfidence,
     assessObservationQuality: () => assessObservationQuality,
@@ -995,6 +996,15 @@ var EduGuardEngagement = (() => {
       interpretation: "Observable signals only; not proof of attention or misconduct.",
       uncertainty: visual.is_unknown ? "Insufficient visual data" : "Head pose and eye closure have multiple possible explanations"
     };
+  }
+  function assertPrivateStream(stream, rawStream, mode, canvasTrackIds) {
+    const tracks = stream.getTracks();
+    const rawIds = new Set((rawStream?.getVideoTracks() || []).map((track) => track.id));
+    if (tracks.some((track) => track.kind === "audio")) throw Error("Student microphone is local-only");
+    if (tracks.some((track) => track.kind === "video" && (rawIds.has(track.id) || !canvasTrackIds.has(track.id))))
+      throw Error("Blocked non-canvas student video track");
+    if (mode === "telemetry-only" && tracks.length) throw Error("Telemetry-only must not send media tracks");
+    return stream;
   }
   return __toCommonJS(engagement_exports);
 })();

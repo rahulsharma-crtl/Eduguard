@@ -707,9 +707,8 @@
             peer.on("connection", (conn) => {
                 console.log(`Incoming telemetry DataChannel from: ${conn.peer}`);
                 conn.on("data", (data) => {
-                    if (data && data.type === "telemetry") {
-                        updateStudentTelemetryBadge(data.peerId || conn.peer, data);
-                    } else if (data && data.type === "student_left") {
+                    const safe = EduGuardRoster.validatePeerTelemetry(data);
+                    if (safe) updateStudentTelemetryBadge(conn.peer, safe); else if (data && data.type === "student_left") {
                         console.log(`Student explicitly left: ${data.peerId || conn.peer}`);
                         removeStudentRoster(data.peerId || conn.peer);
                     }
@@ -998,7 +997,7 @@
             if (event.data && event.data.type === "eduguard:init") {
                 const args = event.data.args;
                 if (args) signalingOptions = args.signaling;
-                if (args && args.roomId && args.roomId !== currentRoomId) {
+                if (args && typeof args.roomId === 'string' && /^[a-zA-Z0-9_-]{8,100}$/.test(args.roomId) && args.signaling && typeof args.signaling.host === 'string' && args.roomId !== currentRoomId) {
                     currentRoomId = args.roomId;
                     initCamera().then(() => initPeerRoom(currentRoomId)).catch(() => {});
                 }

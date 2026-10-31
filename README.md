@@ -2,7 +2,7 @@
 
 Privacy-focused live classrooms with a React/Vite frontend, FastAPI backend, PeerJS signaling, and PostgreSQL. Streamlit is no longer part of the running application.
 
-Students receive teacher video/audio while MediaPipe runs locally. Only synthetic face-mesh video, microphone audio while unmuted, and derived observations leave the student's device. The frontend requests hardware permissions after joining. Engagement scores are heuristic observations, not evidence of intent or learning.
+Students receive teacher video/audio while MediaPipe runs locally. Students explicitly select mesh video or telemetry-only sharing. Student microphone audio is not transmitted; optional audio analysis stays local. Derived observations and mesh still carry privacy risks. The frontend requests hardware permissions after joining. Engagement scores are heuristic observations, not evidence of intent or learning.
 
 ## Local development
 
@@ -39,7 +39,7 @@ Use the root `render.yaml` Blueprint. It creates two free web services and a fre
 
 ## Behavior and security
 
-- Teacher passwords are checked server-side. Signed, room-scoped tokens expire after 12 hours; student tokens cannot read rosters/reports or control other rooms. Invitation links grant student access; this is not LMS identity verification.
+- Teacher passwords are checked server-side. Signed, room-scoped tokens expire after 12 hours; student tokens cannot read rosters/reports or control other rooms. Signed expiring invitation links grant student access only after explicit consent; this is not LMS identity verification.
 - Derived telemetry is queued in the current browser tab's session storage before HTTP delivery. API sample IDs make retries idempotent; failed uploads retry while the tab remains open or after reloading it. Closing the tab permanently can lose samples that never reached the API. Stored data uses PostgreSQL in the supplied cloud setup.
 - Ending a classroom stops ingestion and causes student media to shut down on their next status poll (within about five seconds when online). Connection loss cannot guarantee immediate remote shutdown.
 - Reports and session averages use all stored observations. Low-quality observations remain unknown and are excluded from scoring averages. Microphone muting and head tilt are not engagement penalties.
@@ -63,3 +63,7 @@ npm run build
 If the browser blocks audio autoplay, student video now retries muted and shows a Play lecture / enable audio button. Click it inside the lecture panel. The teacher must have a working local camera preview. For networks where direct media cannot connect, configure the API ICE_SERVERS_JSON environment variable with a JSON array containing STUN and your provider's browser-usable TURN credentials, then redeploy the API and reload both classrooms. Never use your TURN provider account/API secret as a browser credential. Signaling alone cannot relay media through restrictive NAT/firewalls.
 
 Run `npm run test:media` for a real two-page WebRTC smoke test using synthetic cameras. It uses installed Chrome on Windows, or install Chromium with `npx playwright install chromium`. No physical camera or microphone is used. CI runs this test after building the static classroom assets.
+
+## Privacy hardening
+
+See [PRIVACY.md](PRIVACY.md) for the audited flow, threat model, data inventory, retention and limits. Start a new classroom after this security update: old invitation links and non-consented student tokens are no longer accepted. Choose telemetry-only or mesh and explicitly consent before joining. Students can withdraw/delete their data; teachers can end/delete the classroom. RETENTION_DAYS defaults to 7; expired rooms are removed by the running server. Configure a teacher password of at least 12 characters (admin123 is rejected). Microphone audio is never transmitted by the current student client.

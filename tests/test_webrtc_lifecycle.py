@@ -61,7 +61,7 @@ def test_student_room_privacy_architecture():
     content = read_file(STUDENT_HTML)
     assert 'id="raw_webcam" style="display: none;"' in content
     assert "virtualCanvasStream = privacyCanvas.captureStream" in content
-    assert "virtualCanvasStream.addTrack(audioTracks[0])" in content
+    assert "virtualCanvasStream.addTrack(audioTracks[0])" not in content
     assert "CRITICAL PRIVACY VIOLATION PREVENTED" in content
 
 

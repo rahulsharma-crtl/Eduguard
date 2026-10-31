@@ -9,7 +9,6 @@
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
 
     <!-- MediaPipe Vision CDNs -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" integrity="sha384-q1KhAZhJcJXr3zfC3Tz07pBqQSabwFIZhXlmlUAB8s0zk4ETWERkIKGBCFQ5Jc3e" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" integrity="sha384-W/7NVG2tfN12ld8faSFVOZ/W4UHFHze98GqEUPTl8EjY9QDwCKQIzoCHp8/IlIIr" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" integrity="sha384-nKiz5QrpRlMQLw5nrZcprT7N9vmmAcIgV8TuGuep4x91V4JIPsXa+D44Wxj0guoa" crossorigin="anonymous"></script>
 
@@ -421,7 +420,7 @@
                     <canvas id="privacy_canvas" width="640" height="480"></canvas>
 
                     <div class="privacy-pill">
-                        <span>🔒</span> Zero Raw Video Transmitted; live microphone audio is shared while unmuted
+                        <span>🔒</span> Student video sharing follows your selected mode. Optional microphone analysis stays local.
                     </div>
                     <div class="feed-overlay">
                         <span id="kinematics_tag">🧑‍🎓 Privacy Mesh Active</span>
@@ -533,7 +532,12 @@
         // State
         let isLecturerAudioSilenced = false;
         let localUserMedia = null;
+        let inferenceTimer = null;
+        let inferenceGeneration = 0;
+        let faceMeshInstance = null;
         let virtualCanvasStream = null;
+        let privacyMode = 'telemetry-only';
+        const canvasTrackIds = new Set();
         let signalingOptions = null;
         let peer = null;
         let activeCall = null;
@@ -590,9 +594,14 @@
         audioAnalysisLabel.appendChild(audioObservationLabel);
         document.getElementById('main_container').prepend(audioAnalysisLabel);
         audioAnalysisToggle.addEventListener('change', async () => {
-            if (!audioAnalysisToggle.checked) { audioContext?.suspend(); return; }
+            if (!audioAnalysisToggle.checked) { audioContext?.suspend(); localUserMedia?.getAudioTracks().forEach(track => {track.stop();localUserMedia.removeTrack(track)}); return; }
             try {
-                if (!localUserMedia?.getAudioTracks().some(track => track.readyState === 'live')) throw Error('Microphone unavailable');
+                if (!localUserMedia?.getAudioTracks().some(track => track.readyState === 'live')) {
+                    const requestedGeneration = inferenceGeneration;
+                    const mic = await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+                    if (requestedGeneration !== inferenceGeneration || !audioAnalysisToggle.checked || !localUserMedia) { mic.getTracks().forEach(track=>track.stop()); return; }
+                    mic.getAudioTracks().forEach(track => localUserMedia.addTrack(track));
+                }
                 if (!audioContext) {
                     const AudioClass = window.AudioContext || window.webkitAudioContext;
                     audioContext = new AudioClass();
@@ -708,7 +717,7 @@
             let isSpeechDetected = false;
             let audioRMS = 0.0;
             const audioTrack = (localUserMedia && localUserMedia.getAudioTracks().length > 0) ? localUserMedia.getAudioTracks()[0] : null;
-            const isMicMuted = !audioTrack || !audioTrack.enabled;
+            const isMicMuted = Boolean(audioTrack && !audioTrack.enabled);
 
             let localAudioSamples = null;
             if (audioAnalysisToggle.checked && audioAnalyser && !isMicMuted && audioContext?.state === 'running') {
@@ -894,12 +903,14 @@
             readinessState.webcam = 'requesting';
             updateOverallStatus();
 
+            const requestedGeneration = ++inferenceGeneration;
             localStreamInitPromise = (async () => {
                 try {
                     localUserMedia = await navigator.mediaDevices.getUserMedia({
                         video: { width: 640, height: 480, frameRate: { ideal: 30 } },
-                        audio: true
+                        audio: false
                     });
+                    if (requestedGeneration !== inferenceGeneration) { localUserMedia.getTracks().forEach(track=>track.stop()); localUserMedia=null; return; }
                     rawWebcam.srcObject = localUserMedia;
                     await rawWebcam.play();
                     readinessState.webcam = 'ready';
@@ -910,12 +921,9 @@
 
                     // Create Virtual Synthetic Video Track from Privacy Canvas
                     virtualCanvasStream = privacyCanvas.captureStream(25);
+                    virtualCanvasStream.getVideoTracks().forEach(track => canvasTrackIds.add(track.id));
 
-                    // Add mic audio track to the canvas stream so teacher can hear student
-                    const audioTracks = localUserMedia.getAudioTracks();
-                    if (audioTracks.length > 0) {
-                        virtualCanvasStream.addTrack(audioTracks[0]);
-                    }
+                    // Student microphone tracks are never attached to a classroom stream.
 
                     // Strict Privacy Guard: Verify no raw webcam video track is transmitted
                     const canvasVideoTracks = virtualCanvasStream.getVideoTracks();
@@ -935,6 +943,7 @@
                         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`
                     });
 
+                    faceMeshInstance = faceMesh;
                     faceMesh.setOptions({
                         maxNumFaces: 1,
                         refineLandmarks: true,
@@ -963,15 +972,16 @@
                         onFaceMeshResults(results);
                     });
 
-                    // Start Camera frame ingest loop
-                    const camera = new Camera(rawWebcam, {
-                        onFrame: async () => {
-                            await faceMesh.send({ image: rawWebcam });
-                        },
-                        width: 640,
-                        height: 480
-                    });
-                    camera.start();
+                    // Reuse the one captured local stream; Camera utilities must not reopen a device.
+                    const generation = ++inferenceGeneration;
+                    const infer = async () => {
+                        if (generation !== inferenceGeneration || !localUserMedia) return;
+                        try { await faceMesh.send({image:rawWebcam}); }
+                        catch (_) { readinessState.faceMesh = 'error'; }
+                        if (generation === inferenceGeneration && localUserMedia)
+                            inferenceTimer = setTimeout(infer, 100);
+                    };
+                    infer();
 
                     console.log("Local camera and FaceMesh initialized successfully.");
                     checkAndEstablishConnection();
@@ -981,6 +991,7 @@
                     // Missing capture must not prevent receiving the teacher lecture.
                     localUserMedia = new MediaStream();
                     virtualCanvasStream = privacyCanvas.captureStream(25);
+                    virtualCanvasStream.getVideoTracks().forEach(track => canvasTrackIds.add(track.id));
                     readinessState.canvasStream = 'ready';
                     audioObservationLabel.textContent = "Audio unavailable; camera/microphone initialization failed. No inference is made.";
                     setConnectionStatus("alert", "Camera/Mic unavailable. Check browser permissions and devices.");
@@ -1006,7 +1017,7 @@
 
             currentRoomId = cleanRoom;
             currentStudentName = studentName;
-            const studentPeerId = `${cleanRoom}-student-${cleanName}-${Math.floor(Math.random() * 10000)}`;
+            const studentPeerId = `${cleanRoom}-student-${crypto.randomUUID()}`;
             const teacherPeerId = `${cleanRoom}-teacher`;
 
             roomBadge.innerText = `Classroom: ${cleanRoom}`;
@@ -1166,7 +1177,9 @@
             console.log(`Initiating outbound WebRTC call to teacher: ${teacherPeerId}`);
 
             try {
-                activeCall = peer.call(teacherPeerId, virtualCanvasStream, { metadata: { studentName: currentStudentName } });
+                const outbound = privacyMode === 'telemetry-only' ? new MediaStream() : virtualCanvasStream;
+                EduGuardEngagement.assertPrivateStream(outbound, localUserMedia, privacyMode, canvasTrackIds);
+                activeCall = peer.call(teacherPeerId, outbound, {constraints:{offerToReceiveAudio:true,offerToReceiveVideo:true},metadata: { studentName: currentStudentName, privacyMode } });
             } catch (err) {
                 console.warn("PeerJS call initiation failed:", err);
                 readinessState.teacherStream = 'error';
@@ -1268,6 +1281,13 @@
         }
 
         function cleanupLocalMedia() {
+            inferenceGeneration++;
+            if (inferenceTimer) clearTimeout(inferenceTimer);
+            if (faceMeshInstance) { try { Promise.resolve(faceMeshInstance.close()).catch(()=>{}); } catch (_) {} faceMeshInstance=null; }
+            if (rawWebcam.srcObject) {
+                rawWebcam.srcObject.getTracks().forEach(track=>track.stop());
+                rawWebcam.srcObject=null;
+            }
             if (localUserMedia) {
                 localUserMedia.getTracks().forEach(track => {
                     try { track.stop(); } catch (_) {}
@@ -1403,11 +1423,15 @@
             }
             if (event.data && event.data.type === "eduguard:init") {
                 const args = event.data.args;
-                if (args && args.roomId) {
+                if (args && typeof args.roomId === 'string' && /^[a-zA-Z0-9_-]{8,100}$/.test(args.roomId)
+                    && args.consent === true && ['mesh','telemetry-only'].includes(args.privacyMode)
+                    && typeof args.studentName === 'string' && args.studentName.length <= 100
+                    && args.signaling && typeof args.signaling.host === 'string') {
+                    privacyMode = args.privacyMode;
                     signalingOptions = args.signaling;
                     currentRoomId = args.roomId;
                     currentStudentName = args.studentName || "Student";
-                    initLocalStream().then(() => initStudentPeer(currentRoomId, currentStudentName)).catch(() => {});
+                    initLocalStream().then(() => { if (localUserMedia && virtualCanvasStream && readinessState.canvasStream === 'ready') initStudentPeer(currentRoomId, currentStudentName); }).catch(() => {});
                 }
                 resizeIframe();
             }
