@@ -890,7 +890,7 @@
             const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
             const isLookingDown = data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("down");
             const isDistracted = data.isLookingAway || data.is_looking_away || data.isLookingUp || data.is_looking_up || statusText.toLowerCase().includes("looking away") || statusText.toLowerCase().includes("distract");
-            const isSideChannelSpeech = data.audio_evasion || statusText.toLowerCase().includes("speaking");
+            const isSideChannelSpeech = false; // Audio is never evidence of misconduct.
 
             if (isSideChannelSpeech || isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
                 badge.classList.add("badge-alert");

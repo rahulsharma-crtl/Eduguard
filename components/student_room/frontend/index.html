@@ -308,8 +308,8 @@
             transition: width 0.3s ease, background-color 0.3s ease;
         }
 
-        /* High-Visibility Lecturer Audio Evasion Alert Banner */
-        .audio-evasion-banner {
+        /* High-Visibility Lecturer Audio Setting Alert Banner */
+        .lecture-audio-banner {
             background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(185, 28, 28, 0.95));
             border: 2px solid #ff4d4d;
             border-radius: var(--radius-md);
@@ -376,13 +376,13 @@
             </div>
         </div>
 
-        <!-- High-Visibility Lecturer Audio Evasion Alert Banner -->
-        <div id="audio_evasion_banner" class="audio-evasion-banner" style="display: none;">
+        <!-- High-Visibility Lecturer Audio Setting Alert Banner -->
+        <div id="lecture_audio_banner" class="lecture-audio-banner" style="display: none;">
             <div class="banner-content">
                 <span class="banner-icon">⚠️</span>
-                <span class="banner-text"><strong>WARNING:</strong> Lecturer Audio is Muted! Unmute immediately. Attention penalties are actively accumulating.</span>
+                <span class="banner-text"><strong>Audio setting:</strong> Lecture audio is muted. This does not affect your observation score.</span>
             </div>
-            <button id="unmute_evasion_btn" class="banner-btn">🔊 Unmute Now</button>
+            <button id="unmute_lecture_btn" class="banner-btn">🔊 Unmute Now</button>
         </div>
 
         <!-- Dual-Pane Stage (75% Teacher Broadcast / 25% Student Privacy Mesh) -->
@@ -527,8 +527,8 @@
         const toggleTeacherAudioBtn = document.getElementById("toggle_teacher_audio_btn");
         const toggleStudentMicBtn = document.getElementById("toggle_student_mic_btn");
         const micIcon = document.getElementById("mic_icon");
-        const audioEvasionBanner = document.getElementById("audio_evasion_banner");
-        const unmuteEvasionBtn = document.getElementById("unmute_evasion_btn");
+        const lectureAudioBanner = document.getElementById("lecture_audio_banner");
+        const unmuteLectureBtn = document.getElementById("unmute_lecture_btn");
 
         // State
         let isLecturerAudioSilenced = false;
@@ -574,13 +574,38 @@
         let frameCount = 0;
         let lastDispatchTime = 0;
 
-        // Client-Side Acoustic Evasion State (Web Audio API)
+        // Client-Side Optional Audio Observation State (Web Audio API)
         let audioContext = null;
         let audioAnalyser = null;
         let audioDataArray = null;
         let speakingFrames = 0;
-        let audioEnergyLevel = 0.0;
-        let audioAlertStatus = "Quiet / Clean";
+        let audioEnergyLevel = null;
+        const audioAnalysisLabel = document.createElement('label');
+        audioAnalysisLabel.textContent = 'Optional local microphone energy analysis (does not identify speech) ';
+        const audioAnalysisToggle = document.createElement('input');
+        audioAnalysisToggle.type = 'checkbox';
+        audioAnalysisLabel.appendChild(audioAnalysisToggle);
+        const audioObservationLabel = document.createElement('span');
+        audioObservationLabel.textContent = 'Analysis off; microphone unavailable until permission is granted.';
+        audioAnalysisLabel.appendChild(audioObservationLabel);
+        document.getElementById('main_container').prepend(audioAnalysisLabel);
+        audioAnalysisToggle.addEventListener('change', async () => {
+            if (!audioAnalysisToggle.checked) { audioContext?.suspend(); return; }
+            try {
+                if (!localUserMedia?.getAudioTracks().some(track => track.readyState === 'live')) throw Error('Microphone unavailable');
+                if (!audioContext) {
+                    const AudioClass = window.AudioContext || window.webkitAudioContext;
+                    audioContext = new AudioClass();
+                    audioAnalyser = audioContext.createAnalyser();
+                    audioAnalyser.fftSize = 2048;
+                    audioContext.createMediaStreamSource(localUserMedia).connect(audioAnalyser);
+                }
+                await audioContext.resume();
+            } catch (_) {
+                audioObservationLabel.textContent = 'Audio unavailable; no vocal inference.';
+            }
+        });
+        let audioAlertStatus = "Unknown";
 
         function setConnectionStatus(type, msg) {
             connStatusBadge.className = `connection-status status-${type}`;
@@ -685,28 +710,19 @@
             const audioTrack = (localUserMedia && localUserMedia.getAudioTracks().length > 0) ? localUserMedia.getAudioTracks()[0] : null;
             const isMicMuted = !audioTrack || !audioTrack.enabled;
 
-            if (audioAnalyser && audioDataArray && !isMicMuted) {
-                audioAnalyser.getByteFrequencyData(audioDataArray);
-                let sumSq = 0;
-                for (let i = 0; i < audioDataArray.length; i++) {
-                    sumSq += audioDataArray[i] * audioDataArray[i];
-                }
-                audioRMS = Math.sqrt(sumSq / audioDataArray.length) / 255.0;
-                audioEnergyLevel = audioRMS;
-
-                // Speech detection threshold (typical speech frequency energy > 0.08)
-                if (audioRMS > 0.08) {
-                    speakingFrames++;
-                    if (speakingFrames >= 6) { // ~200ms sustained speech
-                        isSpeechDetected = true;
-                    }
-                } else {
-                    speakingFrames = Math.max(0, speakingFrames - 1);
-                }
-            } else {
-                audioEnergyLevel = 0.0;
-                speakingFrames = 0;
+            let localAudioSamples = null;
+            if (audioAnalysisToggle.checked && audioAnalyser && !isMicMuted && audioContext?.state === 'running') {
+                localAudioSamples = new Float32Array(audioAnalyser.fftSize);
+                audioAnalyser.getFloatTimeDomainData(localAudioSamples);
             }
+            const audioObservation = EduGuardEngagement.observeAudio({
+                optedIn: audioAnalysisToggle.checked,
+                available: Boolean(audioTrack && audioTrack.readyState !== 'ended'),
+                micMuted: Boolean(audioTrack && !audioTrack.enabled), lecturerMuted: isLecturerAudioSilenced,
+                samples: localAudioSamples
+            });
+            audioEnergyLevel = audioObservation.rms;
+            audioObservationLabel.textContent = `${audioObservation.microphone}; energy ${audioObservation.energy}. Speech unknown.`;
 
             // Lazy initialize engine if script loaded asynchronously
             if (!engagementEngine && typeof EduGuardEngagement !== 'undefined') {
@@ -769,7 +785,7 @@
                     kinematicsTag.innerText = "⚠️ Alert: Prolonged Eye Closure";
                 } else if (frameAnalysis.audio_evasion) {
                     valStatus.style.color = "var(--danger-color)";
-                    kinematicsTag.innerText = "🚨 Alert: Suspicious Vocal Activity";
+                    kinematicsTag.innerText = "Optional audio observation";
                 } else if (frameAnalysis.is_looking_down) {
                     // Pedagogical observable state: Reading textbook, taking notes, or writing
                     valStatus.style.color = "#3b82f6";
@@ -813,7 +829,8 @@
                     is_speech_detected: frameAnalysis.is_speech_detected,
                     is_mic_muted: frameAnalysis.is_mic_muted,
                     is_lecturer_audio_muted: isLecturerAudioSilenced,
-                    audio_energy: parseFloat(audioEnergyLevel.toFixed(3)),
+                    audio_energy: audioEnergyLevel,
+                    observations: EduGuardEngagement.multimodalObservation(frameAnalysis, audioObservation),
                     audio_status: frameAnalysis.audio_status,
                     audio_evasion: frameAnalysis.audio_evasion,
                     status: frameAnalysis.status,
@@ -912,23 +929,6 @@
 
                     readinessState.canvasStream = 'ready';
 
-                    // Initialize Client-Side Audio Analyser (Privacy-preserving local speech & evasion detection)
-                    try {
-                        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                        if (AudioContextClass && audioTracks.length > 0) {
-                            audioContext = new AudioContextClass();
-                            audioAnalyser = audioContext.createAnalyser();
-                            audioAnalyser.fftSize = 256;
-                            audioAnalyser.smoothingTimeConstant = 0.3;
-                            const audioSource = audioContext.createMediaStreamSource(localUserMedia);
-                            audioSource.connect(audioAnalyser);
-                            audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
-                            console.log("Client-side acoustic evasion analyser initialized successfully.");
-                        }
-                    } catch (audioErr) {
-                        console.warn("Client audio analyser initialization notice:", audioErr);
-                    }
-
                     // Initialize MediaPipe FaceMesh
                     readinessState.faceMesh = 'loading';
                     const faceMesh = new FaceMesh({
@@ -978,8 +978,12 @@
                 } catch (err) {
                     console.error("Local camera initialization failed:", err);
                     readinessState.webcam = 'error';
-                    readinessState.canvasStream = 'error';
-                    setConnectionStatus("alert", "Camera/Mic Permission Denied");
+                    // Missing capture must not prevent receiving the teacher lecture.
+                    localUserMedia = new MediaStream();
+                    virtualCanvasStream = privacyCanvas.captureStream(25);
+                    readinessState.canvasStream = 'ready';
+                    audioObservationLabel.textContent = "Audio unavailable; camera/microphone initialization failed. No inference is made.";
+                    setConnectionStatus("alert", "Camera/Mic unavailable. Check browser permissions and devices.");
                 } finally {
                     isLocalStreamInitializing = false;
                 }
@@ -1304,19 +1308,19 @@
             });
         }
 
-        // --- 6. Lecturer Audio Evasion Detection & Control Handlers ---
+        // --- 6. Lecturer Audio Setting Detection & Control Handlers ---
         const teacherVideo = document.getElementById("teacher_feed");
 
-        function handleAudioEvasion(isMuted) {
+        function updateLecturerMuteState(isMuted) {
             isLecturerAudioSilenced = isMuted;
             if (isMuted) {
-                if (audioEvasionBanner) audioEvasionBanner.style.display = "flex";
+                if (lectureAudioBanner) lectureAudioBanner.style.display = "flex";
                 if (toggleTeacherAudioBtn) {
                     toggleTeacherAudioBtn.classList.add("off");
                     toggleTeacherAudioBtn.innerHTML = `<span>🔇</span> Unmute Lecture Audio`;
                 }
             } else {
-                if (audioEvasionBanner) audioEvasionBanner.style.display = "none";
+                if (lectureAudioBanner) lectureAudioBanner.style.display = "none";
                 if (toggleTeacherAudioBtn) {
                     toggleTeacherAudioBtn.classList.remove("off");
                     toggleTeacherAudioBtn.innerHTML = `<span>🔊</span> Mute Lecture Audio`;
@@ -1329,7 +1333,7 @@
         if (teacherVideo) {
             teacherVideo.addEventListener('volumechange', () => {
                 const isMuted = teacherVideo.muted || teacherVideo.volume <= 0.05;
-                handleAudioEvasion(isMuted);
+                updateLecturerMuteState(isMuted);
             });
         }
 
@@ -1338,18 +1342,18 @@
             if (teacherVideo) {
                 const isMuted = teacherVideo.muted === true || teacherVideo.volume < 0.10;
                 if (isMuted !== isLecturerAudioSilenced) {
-                    handleAudioEvasion(isMuted);
+                    updateLecturerMuteState(isMuted);
                 }
             }
         }, 2000);
 
-        if (unmuteEvasionBtn) {
-            unmuteEvasionBtn.addEventListener("click", () => {
+        if (unmuteLectureBtn) {
+            unmuteLectureBtn.addEventListener("click", () => {
                 if (teacherVideo) {
                     teacherVideo.muted = false;
                     teacherVideo.volume = 1.0;
                 }
-                handleAudioEvasion(false);
+                updateLecturerMuteState(false);
             });
         }
 
@@ -1360,7 +1364,7 @@
                 teacherVideo.volume = 1.0;
             }
             const isMuted = teacherVideo.muted || teacherVideo.volume <= 0.05;
-            handleAudioEvasion(isMuted);
+            updateLecturerMuteState(isMuted);
         });
 
         toggleStudentMicBtn.addEventListener("click", () => {

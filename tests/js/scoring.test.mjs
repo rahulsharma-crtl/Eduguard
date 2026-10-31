@@ -127,7 +127,7 @@ test('Absence: CEI is explicitly forced to 0.0 when no face is detected', () => 
 // ==========================================
 // 3. Distraction Test (Looking Away / Down / Up)
 // ==========================================
-test('Distraction: Diverted gaze (yaw/pitch) increases distraction and penalizes attentiveness', () => {
+test('Head direction is observable without automatic distraction penalties', () => {
     const engine = new EngagementEngine({ smoothing: { enabled: false } });
 
     // Scenario A: Looking Away (Horizontal Yaw asymmetry)
@@ -139,10 +139,10 @@ test('Distraction: Diverted gaze (yaw/pitch) increases distraction and penalizes
 
     assert.equal(awayResult.is_looking_away, true);
     assert.equal(awayResult.status, 'Looking Away');
-    assert.equal(awayResult.attentiveness, 0.65, 'Attentiveness reduced from 1.0 to 0.65 (-0.35)');
-    assert.equal(awayResult.distraction, 0.30, 'Distraction increased from 0.0 to 0.30 (+0.30)');
+    assert.equal(awayResult.attentiveness, 1.0);
+    assert.equal(awayResult.distraction, 0.0);
     // CEI = 0.30*1.0 + 0.45*0.65 + 0.25*(1 - 0.30) = 0.30 + 0.2925 + 0.175 = 0.7675
-    assert.equal(awayResult.raw_cei, 0.7675);
+    assert.equal(awayResult.raw_cei, 1.0);
 
     // Scenario B: Looking Down (Pitch asymmetry)
     // Nose close to chin: dTop = |0.65 - 0.25| = 0.40; dBot = |0.70 - 0.65| = 0.05 -> pitchRatio = 8.0 (> 2.30)
@@ -320,9 +320,9 @@ test('Temporal smoothing: Time-aware EMA smoothly bridges frames while preservin
     });
     const frame2 = engine.processFrame(turnAway, 1033);
 
-    assert.equal(frame2.raw_cei, 0.7675, 'Raw score immediately reflects instantaneous distraction');
+    assert.equal(frame2.raw_cei, 1.0, 'Head orientation alone does not lower the score');
     assert.ok(frame2.smoothed_cei > 0.95, 'Smoothed score gracefully buffers momentary glance away');
-    assert.notEqual(frame2.raw_cei, frame2.smoothed_cei);
+    assert.equal(frame2.raw_cei, frame2.smoothed_cei);
 });
 
 // ==========================================

@@ -40,6 +40,8 @@ var EduGuardEngagement = (() => {
     determinePresence: () => determinePresence,
     estimateHeadPose: () => estimateHeadPose,
     isEyeClosed: () => isEyeClosed,
+    multimodalObservation: () => multimodalObservation,
+    observeAudio: () => observeAudio,
     ptDist: () => ptDist,
     ptDist3D: () => ptDist3D
   });
@@ -96,6 +98,7 @@ var EduGuardEngagement = (() => {
       // Pedagogical engagement rule: Looking down is an observable pose (note-taking/reading),
       // NOT disengagement. When false, looking down does not penalize attentiveness.
       penalizeLookingDown: false,
+      penalizeHeadOrientation: false,
       // Quality and geometry thresholds
       minInterocularDistance: 15,
       // Pixels in 640x480 coordinate space
@@ -718,7 +721,7 @@ var EduGuardEngagement = (() => {
     } else if (state.consecutiveClosedFrames > thresholds.microBlinkFrames && !isNaturalBlink) {
       attentiveness -= 0.15;
     }
-    if (pose.isLookingAway) {
+    if (thresholds.penalizeHeadOrientation && pose.isLookingAway) {
       attentiveness -= 0.35;
       distraction += 0.3;
     }
@@ -728,7 +731,7 @@ var EduGuardEngagement = (() => {
         distraction += 0.2;
       }
     }
-    if (pose.isLookingUp) {
+    if (thresholds.penalizeHeadOrientation && pose.isLookingUp) {
       attentiveness -= 0.25;
       distraction += 0.2;
     }
@@ -860,7 +863,7 @@ var EduGuardEngagement = (() => {
       this.lastTimestamp = timestamp;
       const isLecturerAudioMuted = Boolean(audioContext.isLecturerAudioMuted);
       const isMicMuted = Boolean(audioContext.isMicMuted);
-      const isSpeechDetected = Boolean(audioContext.isSpeechDetected);
+      const isSpeechDetected = false;
       if (quality.status === "insufficient") {
         return {
           quality: "insufficient",
@@ -929,9 +932,6 @@ var EduGuardEngagement = (() => {
         statusStr = "Subject Absent";
       } else if (proxies.isDrowsy) {
         statusStr = "Drowsy (Eyes Closed)";
-      } else if (isSpeechDetected && proxies.isGazeDiverted) {
-        isAudioEvasion = true;
-        statusStr = "Speaking (Gaze Diverted)";
       } else if (proxies.isLookingAway) {
         statusStr = "Looking Away";
       } else if (proxies.isLookingDown) {
@@ -964,7 +964,7 @@ var EduGuardEngagement = (() => {
         is_speech_detected: isSpeechDetected,
         is_mic_muted: isMicMuted,
         is_lecturer_audio_muted: isLecturerAudioMuted,
-        audio_status: isLecturerAudioMuted ? "Lecturer Audio Muted" : isMicMuted ? "Mic Muted" : isSpeechDetected ? "Speaking" : "Quiet / Clean",
+        audio_status: isLecturerAudioMuted ? "Lecturer Audio Muted" : isMicMuted ? "Mic Muted" : isSpeechDetected ? "Speaking" : "No vocal inference",
         audio_evasion: isAudioEvasion,
         quality_reason: quality.reason,
         multiple_faces_detected: Boolean(quality.multipleFacesDetected)
@@ -972,5 +972,29 @@ var EduGuardEngagement = (() => {
     }
   };
   var engagement_default = EngagementEngine;
+  function observeAudio({ optedIn = false, available = false, micMuted = false, lecturerMuted = false, samples = null } = {}) {
+    const valid = samples && samples.length && Array.from(samples).every(Number.isFinite);
+    const measurable = optedIn && available && !micMuted && valid;
+    const rms = measurable ? Math.sqrt(Array.from(samples).reduce((sum, x) => sum + x * x, 0) / samples.length) : null;
+    return {
+      analysis: optedIn ? "enabled" : "disabled",
+      microphone: !available ? "unavailable" : micMuted ? "muted" : "available",
+      lecturer: lecturerMuted ? "muted" : "audible",
+      energy: rms === null ? "unknown" : rms > 0.02 ? "elevated" : "low",
+      rms,
+      vocal_activity: "unknown",
+      uncertainty: "Audio energy cannot distinguish speech from background noise."
+    };
+  }
+  function multimodalObservation(visual, audio) {
+    return {
+      face_presence: visual.is_unknown ? "unknown" : visual.presence ? "detected" : "not_detected",
+      eye_closure: visual.is_unknown ? "unknown" : visual.is_drowsy ? "prolonged" : "not_prolonged",
+      head_orientation: visual.is_unknown ? null : visual.head_pose || null,
+      audio,
+      interpretation: "Observable signals only; not proof of attention or misconduct.",
+      uncertainty: visual.is_unknown ? "Insufficient visual data" : "Head pose and eye closure have multiple possible explanations"
+    };
+  }
   return __toCommonJS(engagement_exports);
 })();
