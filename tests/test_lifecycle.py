@@ -97,5 +97,5 @@ def test_additive_migration_keeps_old_records_and_does_not_invent_attendance(tmp
     assert row['avg_cei']==.6
     store.engine.dispose()
     repeat=Store(f'sqlite:///{path}')
-    with repeat.engine.connect() as conn:assert len(conn.execute(select(repeat.migrations)).all())==1
+    with repeat.engine.connect() as conn:assert {row[0] for row in conn.execute(select(repeat.migrations)).all()}=={'2','3'}
     repeat.engine.dispose()

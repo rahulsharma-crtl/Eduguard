@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { DurableTelemetryOutbox } from './durable_outbox.mjs';
 import './style.css';
+import {TeacherAccess} from './TeacherAccess.jsx';
 import { percent, duration, observationLabel, ObservationGuide, StudentGuidance, Trend } from './observations.jsx';
 
 const API = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/,'');
@@ -57,7 +58,7 @@ function App(){
     const [config,setConfig]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
     const [closureReason,setClosureReason]=useState('ended');
     const [roster,setRoster]=useState([]),[closed,setClosed]=useState(false),[samples,setSamples]=useState([]),[pending,setPending]=useState(0);
-    const [roomName,setRoomName]=useState(''),[studentName,setStudentName]=useState(''),[password,setPassword]=useState('');
+    const [studentName,setStudentName]=useState('');
     const [verified,setVerified]=useState(false);
     const [filter,setFilter]=useState(''),[presence,setPresence]=useState('all'),[lastUpdated,setLastUpdated]=useState(null),[classTrend,setClassTrend]=useState([]),[reportBusy,setReportBusy]=useState(false),[configAttempt,setConfigAttempt]=useState(0);
     const [copyLabel,setCopyLabel]=useState('Copy invitation');
@@ -141,9 +142,9 @@ function App(){
         event.preventDefault();setBusy(true);setError('');
         try{
             const next=roomFromLink?await request(`/rooms/${encodeURIComponent(roomFromLink)}/join`,{body:{name:studentName,client_id:participantId(localStorage,roomFromLink,(config?.retention_days||7)*86400000),invitation:invitationToken,consent,privacy_mode:privacyMode}})
-                :await request('/rooms',{body:{name:roomName,password}});
+                :null;
             if(Number.isFinite(next.server_utc))clockOffsetRef.current=next.server_utc-Date.now()/1000;
-            next.local_expires_at=Date.now()+(config?.retention_days||7)*86400000;setVerified(true);setSession(next);setPassword('');setClosed(false);setClosureReason('ended');setSamples([]);setRoster([]);setClassTrend([]);
+            next.local_expires_at=Date.now()+(config?.retention_days||7)*86400000;setVerified(true);setSession(next);setClosed(false);setClosureReason('ended');setSamples([]);setRoster([]);setClassTrend([]);
             if(!config)setConfig(await request('/config'));
         }catch(e){setError(e.message)}finally{setBusy(false)}
     }
@@ -187,10 +188,10 @@ function App(){
         {!config&&<div className="notice" role="status">Connecting to the classroom service. Render may need a minute to wake up. <button className="secondary" onClick={()=>{setError('');setConfigAttempt(value=>value+1)}}>Retry connection</button></div>}
         {error&&<div className="notice error" role="alert"><span>{error}</span><button onClick={()=>setError('')} aria-label="Dismiss error">×</button></div>}
         {!session?<main id="main" className="welcome"><section className="intro"><p className="eyebrow">PRESENCE WITHOUT EXPOSURE</p><h1>A classroom built<br/>around <em>connection.</em></h1><p className="lede">Teach live. Understand participation. Keep raw student camera footage on their own devices.</p><div className="feature-row"><span>Local face analysis</span><span>Live lecture</span><span>Session reports</span></div><div className="privacy-note"><span className="shield">◇</span><div><strong>Your camera stays yours.</strong><p>Students choose telemetry-only or synthetic mesh sharing. Derived data can still identify people or reveal sensitive behavior. Optional microphone analysis stays local; no student microphone audio is transmitted.</p></div></div></section>
-            <section className="entry-card"><span className="step-label">{roomFromLink?'STUDENT ACCESS':'TEACHER ACCESS'}</span><h2>{roomFromLink?'Join your classroom':'Start a classroom'}</h2><p>{roomFromLink?'Choose an alias, review sharing, then consent to join.':'Create a session and invite your students.'}</p>
-                <form onSubmit={enter} aria-busy={busy}>{roomFromLink?<label>Display alias (avoid your full name)<input required maxLength={100} autoComplete="off" value={studentName} onChange={e=>setStudentName(e.target.value)}/></label>:<><label>Classroom name<input required maxLength={100} placeholder="e.g. Mathematics · Grade 10" value={roomName} onChange={e=>setRoomName(e.target.value)}/></label><label>Administrator password<input required type="password" maxLength={256} autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label></>}
+            <section className="entry-card"><span className="step-label">{roomFromLink?'STUDENT ACCESS':'TEACHER ACCESS'}</span><h2>{roomFromLink?'Join your classroom':'Start a classroom'}</h2><p>{roomFromLink?'Choose an alias, review sharing, then consent to join.':'Create your own teacher account or sign in, then start a classroom.'}</p>
+                {!roomFromLink?<TeacherAccess request={request} enabled={Boolean(config)} onSession={next=>{next.local_expires_at=Date.now()+(config?.retention_days||7)*86400000;setVerified(true);setSession(next);setClosed(Boolean(next.closed));setClosureReason('ended');setSamples([]);setRoster([]);setClassTrend([])}}/>:<form onSubmit={enter} aria-busy={busy}>{roomFromLink?<label>Display alias (avoid your full name)<input required maxLength={100} autoComplete="off" value={studentName} onChange={e=>setStudentName(e.target.value)}/></label>:null}
                 {roomFromLink&&<>{!invitationToken&&<p role="alert" className="notice">This invitation is incomplete. Ask your teacher for the full invitation link, including its invitation token.</p>}<label>Student privacy mode<select value={privacyMode} onChange={e=>setPrivacyMode(e.target.value)}><option value="telemetry-only">Telemetry only — no student media transmitted</option><option value="mesh">Synthetic facial mesh video shared</option></select></label><p className="small">Landmarks, mesh and identifiable telemetry can reveal sensitive behavior. This is not anonymous. Data is retained for up to {config?.retention_days || 7} days; you can delete your session. No raw webcam video is shared. Optional mic analysis stays local.</p><label><input type="checkbox" required checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to local camera analysis and sharing derived observations in my selected mode.</label></>}
-                <button className="primary" disabled={busy||!config||(Boolean(roomFromLink)&&(!consent||!invitationToken))}>{busy?'Connecting…':roomFromLink?'Join classroom →':'Launch classroom →'}</button></form><p className="small">{!config?'Connecting to the classroom service…':'Camera access starts after consent and joining. Microphone access requires a separate opt-in in the classroom.'}</p>
+                <button className="primary" disabled={busy||!config||(Boolean(roomFromLink)&&(!consent||!invitationToken))}>{busy?'Connecting…':roomFromLink?'Join classroom →':'Launch classroom →'}</button></form>}<p className="small">{!config?'Connecting to the classroom service…':'Camera access starts after consent and joining. Microphone access requires a separate opt-in in the classroom.'}</p>
             </section></main>:<main id="main" className="classroom"><div className="classroom-heading"><div><p className="eyebrow">{closed?(closureReason==='ended'?'SESSION CONCLUDED':'MONITORING PAUSED'):session.role==='teacher'?'TEACHER CONSOLE':'STUDENT CLASSROOM'}</p><h1>{session.name}</h1></div><button className="secondary" onClick={exit} disabled={busy}>{busy?'Saving…':session.role==='teacher'?(closed?'New classroom':'End classroom'):'Leave classroom'}</button></div>
             {session.role==='teacher'&&<div className="invitation"><div><span className="step-label">INVITE YOUR STUDENTS</span><code>{invitation}</code></div><button className="secondary" onClick={()=>navigator.clipboard.writeText(invitation).then(()=>setCopyLabel('Copied!')).catch(()=>setError('Copy the invitation text manually.'))}>{copyLabel}</button></div>}
             {session.role==='student'&&!closed&&<StudentGuidance mode={session.privacy_mode}/>}

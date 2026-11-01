@@ -27,8 +27,6 @@ services:
         value: "7"
       - key: AUTH_SIGNING_KEY
         generateValue: true
-      - key: TEACHER_ADMIN_PASSWORD
-        sync: false
       - key: ALLOWED_ORIGINS
         sync: false
       - key: SIGNALING_URL

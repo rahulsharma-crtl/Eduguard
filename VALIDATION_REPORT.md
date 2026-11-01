@@ -1,6 +1,10 @@
 # EduGuard production-readiness verification
 
-Verified **2026-11-01**. Scope: existing React/Vite frontend, FastAPI API, PeerJS service and PostgreSQL deployment configuration. No Streamlit or architecture replacement. Source baseline is commit `53c4b60` plus the current **uncommitted working tree**, including the preceding UI/evaluation work and this verification's fixes. This is not a signed release attestation.
+Verified **2026-11-01**. Scope: existing React/Vite frontend, FastAPI API, PeerJS service and PostgreSQL deployment configuration. No Streamlit or architecture replacement. Original verification baseline was commit `53c4b60` plus the UI/evaluation working tree, subsequently pushed as `a0ed32d`. The teacher-account update below adds further changes. This is not a signed release attestation.
+
+## Teacher-account update
+
+Teacher-owned registration/sign-in and recovery replace the shared-password frontend. Local Python tests now report **56 passed, 1 PostgreSQL test skipped**; JavaScript remains **61 passed**. The actual React/FastAPI browser lifecycle now includes registration, one-time recovery acknowledgement, sign-out, incorrect login, recovery reset and sign-in with the new password. All **7 Playwright tests pass** with the account update, including media privacy/regression scenarios. Build and compatibility checks pass. The public endpoint measurements below predate this account update; no deployed account verification is claimed. See TEACHER_ACCOUNTS.md for migration version 3 and residual limitations. In the older findings below, shared teacher-password requirements are superseded: AUTH_SIGNING_KEY is still required; TEACHER_ADMIN_PASSWORD is optional legacy compatibility only and can be removed from Render.
 
 ## Verdict
 

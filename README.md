@@ -18,7 +18,7 @@ npm run build
 python scripts/start_local.py
 ```
 
-Open http://localhost:5173. Your generated teacher password is in ignored `.env.local`. Existing locally configured teacher passwords are imported by the setup script when available. SQLite is used locally; the previous eduguard_telemetry.db is preserved and is not overwritten. The new API uses its own classroom tables. Historical Streamlit records are not automatically imported into the new dashboard.
+Open http://localhost:5173. Choose **Create account** to set your own teacher username and password. Save the password in your password manager and keep the one-time recovery code safe. No shared teacher password is required. SQLite is used locally; the previous eduguard_telemetry.db is preserved and is not overwritten. The new API uses its own classroom tables. Historical Streamlit records are not automatically imported into the new dashboard.
 
 ## Deploy frontend to Vercel
 
@@ -31,7 +31,7 @@ Open http://localhost:5173. Your generated teacher password is in ignored `.env.
 Use the root `render.yaml` Blueprint. It creates two free web services and a free PostgreSQL database. No paid plan is selected.
 
 1. Deploy `eduguard-signaling`, copy its actual HTTPS origin, then use that value for **SIGNALING_URL** on the API service.
-2. Configure the API's **TEACHER_ADMIN_PASSWORD** (your private password), **ALLOWED_ORIGINS** (the exact Vercel frontend origin; comma-separated for multiple origins), and **SIGNALING_URL**. The Blueprint generates **AUTH_SIGNING_KEY** and connects **DATABASE_URL** automatically. Keep the signing key stable; changing it invalidates existing classroom tokens.
+2. Configure the API's **ALLOWED_ORIGINS** (the exact Vercel frontend origin; comma-separated for multiple origins), and **SIGNALING_URL**. The Blueprint generates **AUTH_SIGNING_KEY** and connects **DATABASE_URL** automatically. Keep the signing key stable; changing it invalidates existing classroom tokens.
 3. Copy the API HTTPS origin into Vercel's **VITE_API_URL** and redeploy the frontend. Vercel preview origins must be explicitly added to ALLOWED_ORIGINS if you use them.
 4. Check API `/health`, signaling `/eduguard/peerjs/id`, then create a classroom and join from another browser/device. Camera/microphone permissions and HTTPS are required. Restricted NATs may need a TURN relay; public STUN is currently configured.
 
@@ -66,7 +66,7 @@ Run `npm run test:media` for a real two-page WebRTC smoke test using synthetic c
 
 ## Privacy hardening
 
-See [PRIVACY.md](PRIVACY.md) for the audited flow, threat model, data inventory, retention and limits. Start a new classroom after this security update: old invitation links and non-consented student tokens are no longer accepted. Choose telemetry-only or mesh and explicitly consent before joining. Students can withdraw/delete their data; teachers can end/delete the classroom. RETENTION_DAYS defaults to 7; expired rooms are removed by the running server. Configure a teacher password of at least 12 characters (admin123 is rejected). Microphone audio is never transmitted by the current student client.
+See [PRIVACY.md](PRIVACY.md) for the audited flow, threat model, data inventory, retention and limits. Start a new classroom after this security update: old invitation links and non-consented student tokens are no longer accepted. Choose telemetry-only or mesh and explicitly consent before joining. Students can withdraw/delete their data; teachers can end/delete the classroom. RETENTION_DAYS defaults to 7; expired rooms are removed by the running server. Teachers register their own passwords (15–128 characters); the backend stores Argon2id hashes. AUTH_SIGNING_KEY remains required. Microphone audio is never transmitted by the current student client.
 
 ## Session lifecycle
 
@@ -75,3 +75,5 @@ See [SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md) for durable queues, signed reco
 Run `npm run test:browser` for both synthetic-media privacy tests and real frontend/API offline-close-reopen recovery. This builds a test-only frontend with a localhost API address; production Vercel builds must use the configured deployment API URL. Install Playwright Chromium first if no supported local Chrome is available.
 
 Real-world behavior evaluation: see [evaluation/README.md](evaluation/README.md) for consent, local capture, participant-disjoint splits, calibration, ablations and publication tables. Real-world accuracy remains unmeasured until consented labeled data is supplied.
+
+Teacher account setup, recovery, deployment and migration details: [TEACHER_ACCOUNTS.md](TEACHER_ACCOUNTS.md).

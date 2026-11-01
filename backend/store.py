@@ -20,9 +20,13 @@ class Store:
                 connection.execute('PRAGMA synchronous=FULL')
                 connection.execute('PRAGMA busy_timeout=20000')
         self.meta = MetaData()
+        self.teachers = Table('teacher_accounts', self.meta,
+            Column('id', String(36), primary_key=True), Column('username', String(64), nullable=False, unique=True),
+            Column('password_hash', String(512), nullable=False), Column('recovery_hash', String(64), nullable=False),
+            Column('auth_version', String(36), nullable=False), Column('created_at', Float, nullable=False))
         self.rooms = Table("classrooms", self.meta,
             Column("id", String(80), primary_key=True), Column("name", String(100), nullable=False),
-            Column("closed", Boolean, nullable=False, default=False), Column("created_at", Float, nullable=False), Column("ended_at", Float))
+            Column("owner_id", String(36)), Column("closed", Boolean, nullable=False, default=False), Column("created_at", Float, nullable=False), Column("ended_at", Float))
         self.sessions = Table("classroom_sessions", self.meta,
             Column("id", String(36), primary_key=True),
             Column("room_id", String(80), ForeignKey("classrooms.id"), nullable=False, index=True),
@@ -44,12 +48,13 @@ class Store:
         self.migrations = Table('eduguard_schema_migrations', self.meta, Column('version', String(20), primary_key=True), Column('applied_at', Float, nullable=False))
         self.meta.create_all(self.engine)
         self.migrate()
+        Index('idx_classrooms_owner', self.rooms.c.owner_id).create(self.engine, checkfirst=True)
         Index('idx_classroom_sessions_status_seen', self.sessions.c.status, self.sessions.c.last_seen).create(self.engine, checkfirst=True)
         Index('idx_classroom_rooms_created', self.rooms.c.created_at).create(self.engine, checkfirst=True)
 
     def migrate(self):
         # Additive migrations only: no old rows, timestamps, or telemetry are rewritten.
-        additions = {'classrooms': [('ended_at','FLOAT')],
+        additions = {'classrooms': [('ended_at','FLOAT'),('owner_id','VARCHAR(36)')],
             'classroom_sessions': [('privacy_mode','VARCHAR(20)'),('consent_at','FLOAT'),('status','VARCHAR(20)')],
             'classroom_samples': [('received_at','FLOAT')]}
         with self.engine.begin() as conn:
@@ -61,6 +66,8 @@ class Store:
             conn.execute(text("UPDATE classroom_sessions SET status = CASE WHEN ended_at IS NULL THEN 'stale' ELSE 'completed' END WHERE status IS NULL"))
             if not conn.execute(select(self.migrations.c.version).where(self.migrations.c.version=='2')).first():
                 conn.execute(self.migrations.insert().values(version='2',applied_at=time.time()))
+            if not conn.execute(select(self.migrations.c.version).where(self.migrations.c.version=='3')).first():
+                conn.execute(self.migrations.insert().values(version='3',applied_at=time.time()))
 
     def room(self, room_id):
         with self.engine.connect() as conn:

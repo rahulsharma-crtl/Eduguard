@@ -150,11 +150,11 @@ def test_raw_payload_fields_are_rejected(client):
 
 
 @pytest.mark.parametrize('password', ['', 'admin123'])
-def test_startup_requires_nondefault_teacher_secret(tmp_path, password):
+def test_startup_does_not_require_shared_teacher_secret(tmp_path, password):
     settings=Settings(f"sqlite:///{tmp_path/'missing-secret.db'}",'s'*48,password,[],'https://signal.example')
-    with pytest.raises(RuntimeError,match='TEACHER_ADMIN_PASSWORD'):
-        with TestClient(create_app(settings)):
-            pass
+    with TestClient(create_app(settings)) as api:
+        assert api.get('/health').status_code == 200
+        assert api.post('/rooms', json={'name':'Room','password':'admin123'}).status_code == 401
 
 
 def test_resume_does_not_duplicate_attendance_and_close_is_global(client):
