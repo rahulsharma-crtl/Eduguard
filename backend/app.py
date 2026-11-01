@@ -176,8 +176,8 @@ def create_app(settings=None):
         return result
 
     def password_policy(password):
-        if len(password) < 15 or password.lower() in {'passwordpassword', '123456789012345', 'qwertyuiopasdfgh'}:
-            raise HTTPException(422, 'Choose a unique password or passphrase of 15–128 characters')
+        if len(password) < 6 or password.lower() in {'passwordpassword', '123456789012345', 'qwertyuiopasdfgh'}:
+            raise HTTPException(422, 'Choose a unique password or passphrase of 6–128 characters')
 
     @app.post('/teachers/register', status_code=201)
     def register_teacher(data: TeacherCredentials, request: Request):

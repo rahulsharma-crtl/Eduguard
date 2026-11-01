@@ -66,7 +66,7 @@ Run `npm run test:media` for a real two-page WebRTC smoke test using synthetic c
 
 ## Privacy hardening
 
-See [PRIVACY.md](PRIVACY.md) for the audited flow, threat model, data inventory, retention and limits. Start a new classroom after this security update: old invitation links and non-consented student tokens are no longer accepted. Choose telemetry-only or mesh and explicitly consent before joining. Students can withdraw/delete their data; teachers can end/delete the classroom. RETENTION_DAYS defaults to 7; expired rooms are removed by the running server. Teachers register their own passwords (15–128 characters); the backend stores Argon2id hashes. AUTH_SIGNING_KEY remains required. Microphone audio is never transmitted by the current student client.
+See [PRIVACY.md](PRIVACY.md) for the audited flow, threat model, data inventory, retention and limits. Start a new classroom after this security update: old invitation links and non-consented student tokens are no longer accepted. Choose telemetry-only or mesh and explicitly consent before joining. Students can withdraw/delete their data; teachers can end/delete the classroom. RETENTION_DAYS defaults to 7; expired rooms are removed by the running server. Teachers register their own passwords (6–128 characters); the backend stores Argon2id hashes. AUTH_SIGNING_KEY remains required. Microphone audio is never transmitted by the current student client.
 
 ## Session lifecycle
 

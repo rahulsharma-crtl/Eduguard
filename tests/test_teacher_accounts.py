@@ -38,7 +38,7 @@ def test_registration_login_and_password_rules(client):
     account=registered(client,'Teacher_One')
     assert account['username']=='teacher_one'
     assert client.post('/teachers/register',json={'username':'teacher_one','password':'another unique password'}).status_code==409
-    assert client.post('/teachers/register',json={'username':'short','password':'admin123'}).status_code==422
+    assert client.post('/teachers/register',json={'username':'short','password':'abc12'}).status_code==422
     assert client.post('/teachers/login',json={'username':'TEACHER_ONE','password':'unique teacher passphrase 2026'}).status_code==200
     for username in ['teacher_one','not_a_user']:
         response=client.post('/teachers/login',json={'username':username,'password':'wrong'})
@@ -84,3 +84,12 @@ def test_account_auth_expiry_and_rate_limit(client,monkeypatch):
     assert client.post('/teachers/login',json={'username':'missing','password':'wrong'}).status_code==429
 
 from tests.test_api import client
+
+
+def test_six_character_password_allowed_for_signup_and_recovery(client):
+    response=client.post('/teachers/register',json={'username':'six_char_teacher','password':'Ab7!xy'})
+    assert response.status_code==201
+    account=response.json()
+    response=client.post('/teachers/recover',json={'username':'six_char_teacher','password':'Zx8!ab','recovery_code':account['recovery_code']})
+    assert response.status_code==200
+    assert client.post('/teachers/login',json={'username':'six_char_teacher','password':'Zx8!ab'}).status_code==200
