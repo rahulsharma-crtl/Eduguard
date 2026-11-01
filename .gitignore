@@ -42,3 +42,13 @@ web/public/classroom/
 
 !.env.example
 !web/.env.example
+
+# Consented evaluation data and local reports remain private
+/evaluation/private/
+/evaluation/results-local/
+*.mp4
+*.webm
+*.mov
+*.mkv
+*.avi
+*.m4v

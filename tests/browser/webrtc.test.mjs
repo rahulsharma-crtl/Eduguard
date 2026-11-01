@@ -9,7 +9,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const root=path.resolve('dist');
 async function reservePort(){const server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port;await new Promise(resolve=>server.close(resolve));return port;}
-for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lecture with verified private outbound tracks: ${privacyMode}`, {timeout:120000}, async()=>{
+for (const scenario of [{mode:'mesh'},{mode:'telemetry-only'},{mode:'telemetry-only',denied:true},{mode:'mesh',calibrate:true},{mode:'telemetry-only',relayOnly:true}]) test(`Student private media: ${JSON.stringify(scenario)}`, {timeout:120000}, async()=>{
+    const privacyMode=scenario.mode;
     const signalPort=await reservePort();
     const signal=spawn(process.execPath,['signaling/server.cjs'],{env:{...process.env,PORT:String(signalPort)},stdio:'pipe'});
     const room='media-test-'+crypto.randomUUID();
@@ -26,7 +27,7 @@ for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lect
             const file=path.resolve(root,'.'+decodeURIComponent(url.pathname));
             if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
             res.setHeader('Content-Type',file.endsWith('.html')?'text/html':file.endsWith('.js')?'text/javascript':'application/octet-stream');
-            res.end(await readFile(file));
+            let content=await readFile(file);if(scenario.calibrate&&file.endsWith(path.join('student','index.html')))content=content.toString().replace(/ integrity="[^"]+"/g,'');res.end(content);
         }catch{res.writeHead(404).end();}
     });
     let browser;
@@ -46,10 +47,11 @@ for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lect
             args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required']});
         const context=await browser.newContext({permissions:['camera','microphone']});
         await context.route(/fonts\.(googleapis|gstatic)\.com/,route=>route.abort());
-        await context.addInitScript(() => {
+        await context.addInitScript(({denied,relayOnly}) => {
             window.__mediaAudit={raw:[],canvas:[],connections:[],captures:[]};
             navigator.mediaDevices.getUserMedia=async constraints=>{
                 window.__mediaAudit.captures.push(constraints);
+                if(denied&&location.pathname.includes('/student/')&&constraints.video)throw new DOMException('Test camera denial','NotAllowedError');
                 const stream=new MediaStream();
                 if(constraints.video){
                     const canvas=document.createElement('canvas');canvas.width=640;canvas.height=480;
@@ -69,8 +71,16 @@ for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lect
             const canvas=HTMLCanvasElement.prototype.captureStream;
             HTMLCanvasElement.prototype.captureStream=function(...args){const stream=canvas.apply(this,args);window.__mediaAudit.canvas.push(...stream.getVideoTracks().map(t=>t.id));return stream};
             const Native=window.RTCPeerConnection;
-            window.RTCPeerConnection=class extends Native{constructor(...args){super(...args);window.__mediaAudit.connections.push(this)}};
-        });
+            window.RTCPeerConnection=class extends Native{constructor(...args){if(relayOnly&&location.pathname.includes('/student/'))args[0]={...args[0],iceTransportPolicy:'relay',iceServers:[]};super(...args);window.__mediaAudit.connections.push(this)}};
+        },scenario);
+        if(scenario.calibrate){
+            const source=await readFile('tests/js/facial_behavior_benchmark.test.mjs','utf8');const fn=source.slice(source.indexOf('function generateSyntheticFace('),source.indexOf('// --- Metrics Calculator ---'));
+            const {LANDMARK_INDICES}=await import('../../core/engagement.mjs');
+            const meshScript=`const LANDMARK_INDICES=${JSON.stringify(LANDMARK_INDICES)};${fn};window.FaceMesh=class{setOptions(){}onResults(fn){this.callback=fn}async send(){this.callback({multiFaceLandmarks:[generateSyntheticFace({ear:.25})]})}async close(){}}`;
+            await context.route('**/face_mesh.js',async route=>{await route.fulfill({contentType:'text/javascript',body:meshScript})});
+            // Stub removes network/model dependence; remove SRI only in this synthetic calibration test.
+
+        }
         const teacher=await context.newPage(),student=await context.newPage();
         const uploads=[];
         student.on('request',request=>{if(['POST','PUT','PATCH'].includes(request.method()))uploads.push(request.url())});
@@ -85,9 +95,23 @@ for (const privacyMode of ['mesh','telemetry-only']) test(`Student receives lect
         await student.goto(base+'/harness?role=student',{waitUntil:'domcontentloaded'});
         const studentFrame=await student.waitForSelector('iframe').then(handle=>handle.contentFrame());
         try{
+            if(scenario.relayOnly){
+                await studentFrame.locator('#media_network_notice').waitFor({state:'visible',timeout:25000});assert.match(await studentFrame.locator('#media_network_notice').textContent(),/TURN relay/);
+                assert.equal(await studentFrame.evaluate(()=>document.getElementById('teacher_feed').videoWidth),0);
+                assert.ok(await studentFrame.evaluate(()=>window.__mediaAudit.connections.some(pc=>pc.getConfiguration().iceTransportPolicy==='relay')));
+                console.log('Verified relay-only without TURN fails visibly, with no decoded lecture.');return;
+            }
             await studentFrame.waitForFunction(()=>document.getElementById('teacher_feed')?.videoWidth>0,{},{timeout:45000});
             const media=await studentFrame.evaluate(()=>{const video=document.getElementById('teacher_feed');return {width:video.videoWidth,height:video.videoHeight,state:video.readyState,tracks:video.srcObject?.getVideoTracks().length}});
             assert.ok(media.width>0&&media.height>0&&media.state>=2&&media.tracks>0,JSON.stringify(media));
+            if(privacyMode==='mesh'&&!scenario.calibrate){
+                await studentFrame.evaluate(()=>peer.disconnect());
+                await studentFrame.waitForFunction(()=>peer.open&&!peer.disconnected,{},{timeout:15000});
+                const count=await studentFrame.evaluate(()=>window.__mediaAudit.connections.length);
+                await studentFrame.evaluate(()=>activeCall.close());
+                await studentFrame.waitForFunction(n=>window.__mediaAudit.connections.length>n&&document.getElementById('teacher_feed').videoWidth>0&&window.__mediaAudit.connections.some(pc=>pc.connectionState==='connected'),count,{timeout:20000});
+            }
+            if(scenario.calibrate){await studentFrame.getByRole('button',{name:'Calibrate camera (look straight ahead)',exact:true}).click();await studentFrame.getByRole('button',{name:'Camera calibrated (click to recalibrate)',exact:true}).waitFor({timeout:15000});}
             await studentFrame.locator('input[type="checkbox"]').check();
             await studentFrame.waitForFunction(()=>window.__mediaAudit.captures.some(c=>c.audio===true&&c.video===false));
             const audit=await studentFrame.evaluate(()=>({raw:window.__mediaAudit.raw,canvas:window.__mediaAudit.canvas,

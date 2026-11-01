@@ -32,7 +32,9 @@ test('Browser-close recovery retains events and one attendance identity; End Cla
   });
   const teacher=await context.newPage();await teacher.goto(frontend,{waitUntil:'domcontentloaded'});
   await teacher.getByLabel('Classroom name',{exact:true}).fill('Lifecycle test');await teacher.getByLabel('Administrator password',{exact:true}).fill('browser-test-only-password');
-  await teacher.getByRole('button',{name:/Launch classroom/}).click();
+  await teacher.getByLabel('Administrator password',{exact:true}).fill('invalid-test-password');
+  await teacher.getByRole('button',{name:/Launch classroom/}).click();await teacher.getByRole('alert').filter({hasText:'Incorrect administrator password'}).waitFor();
+  await teacher.getByLabel('Administrator password',{exact:true}).fill('browser-test-only-password');await teacher.getByRole('button',{name:/Launch classroom/}).click();
   await teacher.locator('.invitation code').waitFor();const invitation=await teacher.locator('.invitation code').textContent();
   const credentials=await teacher.evaluate(()=>JSON.parse(localStorage.getItem('eduguard-teacher-session')));
   const roster=async()=>{const response=await fetch(`${api}/rooms/${credentials.room_id}/roster`,{headers:{Authorization:`Bearer ${credentials.token}`}});return response.json()};
@@ -50,7 +52,11 @@ test('Browser-close recovery retains events and one attendance identity; End Cla
   const completed=await eventually(roster,data=>data.room.closed&&data.students[0].status==='completed');
   assert.equal(completed.students[0].online,false);
   await student.getByText('The teacher has ended this classroom. Camera and microphone capture have stopped.').waitFor({timeout:15000});
-  console.log('Verified durable browser recovery, stable attendance and global finalization.');
+  const downloaded=teacher.waitForEvent('download');await teacher.getByRole('button',{name:/Download CSV/}).click();const report=await downloaded;assert.equal(report.suggestedFilename(),'eduguard-telemetry.csv');
+  await student.getByRole('button',{name:'Withdraw and delete my session data'}).click();await eventually(roster,data=>data.students.length===0);
+  await teacher.getByRole('button',{name:'End and delete this classroom’s data'}).click();
+  await eventually(async()=>{const response=await fetch(`${api}/rooms/${credentials.room_id}`,{headers:{Authorization:`Bearer ${credentials.token}`}});return response.status},status=>status===401);
+  console.log('Verified invalid/valid login, durable recovery, stable attendance, global closure, report download and student/room deletion.');
  }catch(error){throw Error(error.message+'\nAPI process diagnostics:\n'+processLog)}
  finally{
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));

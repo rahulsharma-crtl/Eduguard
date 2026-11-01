@@ -1,11 +1,19 @@
-<!doctype html><meta charset="utf-8"><title>EduGuard real-video landmark capture</title>
-<h1>Real-video landmark capture</h1><p>Video stays in this browser. Only derived landmarks are exported. Review labels independently of predictions.</p>
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{max-width:900px;margin:24px auto;padding:16px;font:16px system-ui;line-height:1.6}input,textarea,button{font:inherit;max-width:100%;padding:8px}video{max-width:100%}button{min-height:44px}:focus-visible{outline:3px solid #6040bb}#status{display:block}</style><title>EduGuard real-video landmark capture</title>
+<h1>Real-video landmark capture</h1><p>Evaluation schema v2. Raw video is never exported. Landmarks are sensitive derived data: save exports only in an ignored private folder. Consent records and identity mappings belong in a separate protected location.</p><p>Video stays in this browser. Only derived landmarks are exported. Review labels independently of predictions.</p>
 <label><input id="consent" type="checkbox">I have consent to process and label this video</label><p><input id="file" type="file" accept="video/*"></p>
-<p>Label intervals in milliseconds (end exclusive). Include every sampled frame; use engine state names.</p>
-<textarea id="labels" rows="6" cols="90">[{"startMs":0,"endMs":1000,"label":"ATTENTIVE"}]</textarea>
-<p><button id="run">Extract labeled landmarks</button><span id="status"></span></p><video id="video" controls width="640"></video>
+<p><label>Participant pseudonym <input id="participant" required pattern="[a-zA-Z0-9_-]{1,80}" placeholder="P001"></label></p>
+<p><label>Consent record pseudonym <input id="consentRecord" placeholder="CONSENT-P001-v1"></label></p>
+<p><label>Annotation protocol / adjudication version <input id="annotationProtocol" placeholder="two-rater-v1-adjudicated"></label></p>
+<p><label>Device category (avoid serial numbers) <input id="device" placeholder="laptop-integrated"></label></p>
+<p><label>Conditions (comma separated) <input id="conditions" value="normal,device-laptop"></label></p>
+<p>Label intervals in milliseconds (end exclusive). End is exclusive. Labels must be independent of predictions. Use null for ambiguous labels. Calibration is a separate neutral/open-eye prefix and is excluded from evaluation. See evaluation/README.md for definitions. Every sampled frame needs exactly one interval.</p>
+<textarea id="labels" rows="14" cols="90">[
+ {"startMs":0,"endMs":4000,"phase":"calibration","labels":{"face":"present","eyes":"open","closure":"no","yaw":"neutral","pitch":"neutral","roll":"neutral","quality":"usable"}},
+ {"startMs":4000,"endMs":10000,"phase":"evaluation","labels":{"face":null,"eyes":null,"closure":null,"yaw":null,"pitch":null,"roll":null,"quality":null}}
+]</textarea>
+<p><button id="run">Extract labeled landmarks</button><span id="status" role="status"></span></p><video id="video" controls width="640"></video>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" integrity="sha384-nKiz5QrpRlMQLw5nrZcprT7N9vmmAcIgV8TuGuep4x91V4JIPsXa+D44Wxj0guoa" crossorigin="anonymous"></script>
-<script src="../components/student_room/frontend/engagement.js"></script>
+
 <script>
 const el = id => document.getElementById(id);
 el('run').onclick = async () => {
@@ -14,8 +22,10 @@ el('run').onclick = async () => {
     try {
         if (!el('consent').checked || !el('file').files[0]) throw Error('Select a consented video first.');
         const intervals = JSON.parse(el('labels').value);
-        const classes = Object.values(EduGuardEngagement.BEHAVIORAL_STATES);
-        if (!Array.isArray(intervals) || !intervals.length || intervals.some(x => !Number.isFinite(x.startMs) || !Number.isFinite(x.endMs) || x.startMs < 0 || x.endMs <= x.startMs || !classes.includes(x.label))) throw Error('Invalid label intervals.');
+        const taskClasses={face:['present','absent'],eyes:['open','closed'],closure:['yes','no'],yaw:['neutral','turned'],pitch:['down','neutral','up'],roll:['neutral','tilted'],quality:['usable','unusable','absent']};
+        const participantId=el('participant').value.trim(),consentRecord=el('consentRecord').value.trim(),annotationProtocol=el('annotationProtocol').value.trim(),device=el('device').value.trim(),conditions=el('conditions').value.split(',').map(x=>x.trim());
+        if(!/^[a-zA-Z0-9_-]{1,80}$/.test(participantId)||!consentRecord||!annotationProtocol||!device)throw Error('Complete pseudonymous participant, consent, annotation protocol and device fields.');
+        if (!Array.isArray(intervals) || !intervals.length || intervals.some(x => !Number.isFinite(x.startMs) || !Number.isFinite(x.endMs) || x.startMs < 0 || x.endMs <= x.startMs || !['calibration','evaluation'].includes(x.phase)||!x.labels||Object.entries(taskClasses).some(([t,values])=>x.labels[t]!==null&&!values.includes(x.labels[t])))) throw Error('Invalid label intervals.');
         const video = el('video');
         url = URL.createObjectURL(el('file').files[0]);
         await new Promise((resolve,reject) => {video.onloadedmetadata=resolve; video.onerror=reject; video.src=url;});
@@ -24,21 +34,21 @@ el('run').onclick = async () => {
         mesh.setOptions({maxNumFaces:1, refineLandmarks:true, minDetectionConfidence:0.5, minTrackingConfidence:0.5});
         let landmarks = null;
         mesh.onResults(result => { landmarks = result.multiFaceLandmarks?.[0] || null; });
-        const frames=[];
+        const frames=[];video.muted=true;
         // Fixed 10 Hz sampling: sequential seeks preserve timestamps independently of processing speed.
         for (let timestampMs=1; timestampMs < video.duration*1000; timestampMs+=100) {
             const matches = intervals.filter(x => x.startMs <= timestampMs && timestampMs < x.endMs);
             if (matches.length !== 1) throw Error(`Exactly one label required at ${timestampMs}ms`);
             await new Promise((resolve,reject) => {video.onseeked=resolve; video.onerror=reject; video.currentTime=timestampMs/1000;});
-            await mesh.send({image:video});
-            frames.push({timestampMs,label:matches[0].label,landmarks});
+            landmarks=null;const started=performance.now();await mesh.send({image:video});
+            frames.push({timestampMs,decodedTimeMs:video.currentTime*1000,phase:matches[0].phase,labels:matches[0].labels,referenceAngles:matches[0].referenceAngles||null,landmarks,extractionMs:performance.now()-started});
             el('status').textContent=` ${frames.length} frames extracted`;
         }
-        const dataset={source:'real-video',consentConfirmed:true,clips:[{id:el('file').files[0].name,frames}]};
+        const dataset={schemaVersion:2,source:'real-video',consentConfirmed:true,clips:[{id:crypto.randomUUID(),participantId,consentRecord,annotationProtocol,device,conditions,extractor:{model:'mediapipe-face-mesh@0.4.1633559619',samplePeriodMs:100,videoWidth:video.videoWidth,videoHeight:video.videoHeight,maxNumFaces:1},frames}]};
         const download=URL.createObjectURL(new Blob([JSON.stringify(dataset)],{type:'application/json'}));
         const a=document.createElement('a'); a.href=download; a.download='real-video-landmarks.json'; a.click();
         setTimeout(()=>URL.revokeObjectURL(download),1000);
     } catch(error) {el('status').textContent=error.message;}
-    finally {if(mesh) await mesh.close(); if(url) URL.revokeObjectURL(url); el('run').disabled=false;}
+    finally {if(mesh) await mesh.close(); if(url) URL.revokeObjectURL(url);el('video').removeAttribute('src');el('video').load(); el('run').disabled=false;}
 };
 </script>

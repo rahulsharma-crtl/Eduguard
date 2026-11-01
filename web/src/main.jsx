@@ -4,9 +4,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { DurableTelemetryOutbox } from './durable_outbox.mjs';
 import './style.css';
+import { percent, duration, observationLabel, ObservationGuide, StudentGuidance, Trend } from './observations.jsx';
 
 const API = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/,'');
-const percent = value => value == null ? '—' : `${(value*100).toFixed(1)}%`;
+
 function restoreSession(room){try{
  purgeExpiredCredentials(localStorage);
  const key=room?`eduguard-student-session:${room}`:'eduguard-teacher-session';
@@ -27,12 +28,14 @@ async function request(path,{token,body,raw=false,keepalive=false,signal}={}) {
 function Classroom({session,config,onTelemetry,onError}) {
     const iframe=useRef(null);
     const [height,setHeight]=useState(750);
+    const [ready,setReady]=useState(false),[slow,setSlow]=useState(false);
+    useEffect(()=>{const timer=setTimeout(()=>setSlow(true),15000);return()=>clearTimeout(timer)},[]);
     const args=useMemo(()=>({roomId:session.peer_room,studentName:session.name,signaling:config.signaling,consent:true,privacyMode:session.privacy_mode}),[session.peer_room,session.name,session.privacy_mode,config]);
     const initialize=useCallback(()=>iframe.current?.contentWindow?.postMessage({type:'eduguard:init',args},location.origin),[args]);
     useEffect(()=>{
         const receive=event=>{
             if(event.origin!==location.origin||event.source!==iframe.current?.contentWindow)return;
-            if(event.data?.type==='eduguard:ready')initialize();
+            if(event.data?.type==='eduguard:ready'){setReady(true);initialize();}
             if(event.data?.type==='eduguard:resize'&&Number.isFinite(event.data.height))setHeight(Math.max(540,Math.min(5000,event.data.height)));
             if(event.data?.type==='eduguard:telemetry'&&session.role==='student'){
                 try{Promise.resolve(onTelemetry(sanitizeTelemetry(event.data.value))).catch(error=>onError(error.message))}catch(error){onError(error.message)}
@@ -42,8 +45,8 @@ function Classroom({session,config,onTelemetry,onError}) {
         const frame=iframe.current;
         return()=>{window.removeEventListener('message',receive);frame?.contentWindow?.postMessage({type:'eduguard:stop'},location.origin)};
     },[initialize,onTelemetry,onError,session.role]);
-    return <iframe ref={iframe} title={`${session.role} live classroom`} src={`/classroom/${session.role}/index.html`}
-        onLoad={initialize} allow="camera; microphone; autoplay; fullscreen" style={{height}} />;
+    return <>{!ready&&<p role="status">{slow?'Classroom controls are taking longer to load. Check your connection, then reload this page; saved telemetry will retry.':'Loading camera and lecture controls…'}</p>}<iframe ref={iframe} title={`${session.role} live classroom`} src={`/classroom/${session.role}/index.html`}
+        onLoad={initialize} allow="camera; microphone; autoplay; fullscreen" style={{height}} /></>;
 }
 
 function App(){
@@ -52,9 +55,11 @@ function App(){
     const [consent,setConsent]=useState(false),[privacyMode,setPrivacyMode]=useState('telemetry-only');
     const [session,setSession]=useState(()=>{const saved=restoreSession(roomFromLink);return saved&&saved.peer_room&&(!roomFromLink||saved.room_id===roomFromLink)?saved:null});
     const [config,setConfig]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+    const [closureReason,setClosureReason]=useState('ended');
     const [roster,setRoster]=useState([]),[closed,setClosed]=useState(false),[samples,setSamples]=useState([]),[pending,setPending]=useState(0);
     const [roomName,setRoomName]=useState(''),[studentName,setStudentName]=useState(''),[password,setPassword]=useState('');
     const [verified,setVerified]=useState(false);
+    const [filter,setFilter]=useState(''),[presence,setPresence]=useState('all'),[lastUpdated,setLastUpdated]=useState(null),[classTrend,setClassTrend]=useState([]),[reportBusy,setReportBusy]=useState(false),[configAttempt,setConfigAttempt]=useState(0);
     const [copyLabel,setCopyLabel]=useState('Copy invitation');
     const reportError=useCallback(message=>setError(message),[]);
     const clockOffsetRef=useRef(0);
@@ -81,7 +86,7 @@ function App(){
         const controller=new AbortController();
         request('/config',{signal:controller.signal}).then(setConfig).catch(e=>{if(e.name!=='AbortError')setError(`Backend unavailable: ${e.message}. A sleeping service can take a minute to start.`)});
         return()=>controller.abort();
-    },[]);
+    },[configAttempt]);
     useEffect(()=>{
         if(!session || session.role!=='student')return;
         let active=true;
@@ -91,7 +96,7 @@ function App(){
             const resumed=await request(`/rooms/${session.room_id}/resume`,{body:{resume_ticket:ticket}});return {...resumed,resume_ticket:ticket};
         })()
             .then(data=>{if(active){if(Number.isFinite(data.server_utc))clockOffsetRef.current=data.server_utc-Date.now()/1000;setSession(previous=>({...previous,token:data.token,resume_ticket:data.resume_ticket}));setVerified(true);setClosed(false)}})
-            .catch(e=>{if(active){setClosed(true);setError(`Session could not resume: ${e.message}`);outbox?.flush().catch(()=>{});if(e.status===401){localStorage.removeItem(`eduguard-student-session:${session.room_id}`);sessionStorage.removeItem('eduguard-session');setSession(null);setVerified(false)}}});
+            .catch(e=>{if(active){setClosureReason('unverified');setClosed(true);setError(`Session could not resume: ${e.message}`);outbox?.flush().catch(()=>{});if(e.status===401){localStorage.removeItem(`eduguard-student-session:${session.room_id}`);sessionStorage.removeItem('eduguard-session');setSession(null);setVerified(false)}}});
         return()=>{active=false};
     },[session?.session_id]);
     useEffect(()=>{
@@ -105,14 +110,14 @@ function App(){
             try{
                 if(session.role==='teacher'){
                     const data=await request(`/rooms/${session.room_id}/roster`,{token:session.token});
-                    if(active){setRoster(data.students);setClosed(data.room.closed)}
+                    if(active){setRoster(data.students);setClosed(data.room.closed);setLastUpdated(Date.now());const valid=data.students.filter(row=>row.online&&!row.latest?.is_unknown&&Number.isFinite(row.latest?.cei));const mean=valid.length?valid.reduce((sum,row)=>sum+row.latest.cei,0)/valid.length:null;setClassTrend(previous=>[...previous.slice(-59),{sample_id:crypto.randomUUID(),timestamp:Date.now()/1000,cei_score:mean,is_unknown:mean===null,status:mean===null?'Unknown':'Online participant snapshot'}])}
                 }else{
                     const room=await request(`/rooms/${session.room_id}`,{token:session.token});
                     lastVerified=Date.now();
-                    if(active)setClosed(room.closed);
+                    if(active){setClosed(room.closed);if(room.closed)setClosureReason('ended')}
                     if(outbox&&verified){if(!room.closed){const beat=await request(`/rooms/${session.room_id}/heartbeat`,{token:session.token,body:{}});if(Number.isFinite(beat.server_utc))clockOffsetRef.current=beat.server_utc-Date.now()/1000;}await outbox.flush();if(active)setPending(outbox.queue.length)}
                 }
-            }catch(e){if(active){setError(e.message);if(e.status===401||e.status===404||Date.now()-lastVerified>30000)setClosed(true)}}
+            }catch(e){if(active){setError(e.message);if(e.status===401||e.status===404||Date.now()-lastVerified>30000){setClosureReason('unverified');setClosed(true)}}}
         };
         poll();const timer=setInterval(poll,closed?30000:5000);
         return()=>{active=false;clearInterval(timer)};
@@ -138,7 +143,7 @@ function App(){
             const next=roomFromLink?await request(`/rooms/${encodeURIComponent(roomFromLink)}/join`,{body:{name:studentName,client_id:participantId(localStorage,roomFromLink,(config?.retention_days||7)*86400000),invitation:invitationToken,consent,privacy_mode:privacyMode}})
                 :await request('/rooms',{body:{name:roomName,password}});
             if(Number.isFinite(next.server_utc))clockOffsetRef.current=next.server_utc-Date.now()/1000;
-            next.local_expires_at=Date.now()+(config?.retention_days||7)*86400000;setVerified(true);setSession(next);setPassword('');setClosed(false);setSamples([]);setRoster([]);
+            next.local_expires_at=Date.now()+(config?.retention_days||7)*86400000;setVerified(true);setSession(next);setPassword('');setClosed(false);setClosureReason('ended');setSamples([]);setRoster([]);setClassTrend([]);
             if(!config)setConfig(await request('/config'));
         }catch(e){setError(e.message)}finally{setBusy(false)}
     }
@@ -168,26 +173,31 @@ function App(){
         }catch(e){setError(e.message);setBusy(false)}
     }
     async function download(){
+        setReportBusy(true);
         try{const response=await request(`/rooms/${session.room_id}/report.csv`,{token:session.token,raw:true});
             const url=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=url;anchor.download='eduguard-telemetry.csv';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-        }catch(e){setError(e.message)}
+        }catch(e){setError(e.message)}finally{setReportBusy(false)}
     }
-    const online=roster.filter(row=>row.online),known=online.filter(row=>row.latest?.cei!=null);
+    const online=roster.filter(row=>row.online),known=online.filter(row=>!row.latest?.is_unknown&&Number.isFinite(row.latest?.cei));
     const average=known.length?known.reduce((sum,row)=>sum+row.latest.cei,0)/known.length:null;
+    const filteredRoster=roster.filter(row=>row.name.toLowerCase().includes(filter.toLowerCase())&&(presence==='all'||(presence==='online'?row.online:!row.online)));
     const invitation=session?`${location.origin}/?room=${encodeURIComponent(session.room_id)}#invite=${encodeURIComponent(session.invitation)}`:'';
     return <div className="app-shell">
-        <header><a className="brand" href="/" aria-label="EduGuard home"><span className="brand-mark">E</span>EduGuard<span className="brand-cloud">CLASSROOM</span></a><span className="privacy-tag"><i/>Browser-based privacy</span></header>
+        <a className="skip-link" href="#main">Skip to main content</a><header><a className="brand" href="/" aria-label="EduGuard home"><span className="brand-mark">E</span>EduGuard<span className="brand-cloud">CLASSROOM</span></a><span className="privacy-tag"><i/>Browser-based privacy</span></header>
+        {!config&&<div className="notice" role="status">Connecting to the classroom service. Render may need a minute to wake up. <button className="secondary" onClick={()=>{setError('');setConfigAttempt(value=>value+1)}}>Retry connection</button></div>}
         {error&&<div className="notice error" role="alert"><span>{error}</span><button onClick={()=>setError('')} aria-label="Dismiss error">×</button></div>}
-        {!session?<main className="welcome"><section className="intro"><p className="eyebrow">PRESENCE WITHOUT EXPOSURE</p><h1>A classroom built<br/>around <em>connection.</em></h1><p className="lede">Teach live. Understand participation. Keep raw student camera footage on their own devices.</p><div className="feature-row"><span>Local face analysis</span><span>Live lecture</span><span>Session reports</span></div><div className="privacy-note"><span className="shield">◇</span><div><strong>Your camera stays yours.</strong><p>Students choose telemetry-only or synthetic mesh sharing. Derived data can still identify people or reveal sensitive behavior. Optional microphone analysis stays local; no student microphone audio is transmitted.</p></div></div></section>
-            <section className="entry-card"><span className="step-label">{roomFromLink?'STUDENT ACCESS':'TEACHER ACCESS'}</span><h2>{roomFromLink?'Join your classroom':'Start a classroom'}</h2><p>{roomFromLink?'Enter your name to join the live session.':'Create a session and invite your students.'}</p>
-                <form onSubmit={enter}>{roomFromLink?<label>Display alias (avoid your full name)<input required maxLength={100} autoComplete="off" value={studentName} onChange={e=>setStudentName(e.target.value)}/></label>:<><label>Classroom name<input required maxLength={100} placeholder="e.g. Mathematics · Grade 10" value={roomName} onChange={e=>setRoomName(e.target.value)}/></label><label>Administrator password<input required type="password" maxLength={256} autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label></>}
-                {roomFromLink&&<><label>Student privacy mode<select value={privacyMode} onChange={e=>setPrivacyMode(e.target.value)}><option value="telemetry-only">Telemetry only — no student media transmitted</option><option value="mesh">Synthetic facial mesh video shared</option></select></label><p className="small">Landmarks, mesh and identifiable telemetry can reveal sensitive behavior. This is not anonymous. Data is retained for up to {config?.retention_days || 7} days; you can delete your session. No raw webcam video is shared. Optional mic analysis stays local.</p><label><input type="checkbox" required checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to local camera analysis and sharing derived observations in my selected mode.</label></>}
-                <button className="primary" disabled={busy||!config||(Boolean(roomFromLink)&&!consent)}>{busy?'Connecting…':roomFromLink?'Join classroom →':'Launch classroom →'}</button></form><p className="small">{!config?'Connecting to the classroom service…':'Camera and microphone permissions are requested after joining.'}</p>
-            </section></main>:<main className="classroom"><div className="classroom-heading"><div><p className="eyebrow">{closed?'SESSION CONCLUDED':session.role==='teacher'?'TEACHER CONSOLE':'STUDENT CLASSROOM'}</p><h1>{session.name}</h1></div><button className="secondary" onClick={exit} disabled={busy}>{busy?'Saving…':session.role==='teacher'?(closed?'New classroom':'End classroom'):'Leave classroom'}</button></div>
+        {!session?<main id="main" className="welcome"><section className="intro"><p className="eyebrow">PRESENCE WITHOUT EXPOSURE</p><h1>A classroom built<br/>around <em>connection.</em></h1><p className="lede">Teach live. Understand participation. Keep raw student camera footage on their own devices.</p><div className="feature-row"><span>Local face analysis</span><span>Live lecture</span><span>Session reports</span></div><div className="privacy-note"><span className="shield">◇</span><div><strong>Your camera stays yours.</strong><p>Students choose telemetry-only or synthetic mesh sharing. Derived data can still identify people or reveal sensitive behavior. Optional microphone analysis stays local; no student microphone audio is transmitted.</p></div></div></section>
+            <section className="entry-card"><span className="step-label">{roomFromLink?'STUDENT ACCESS':'TEACHER ACCESS'}</span><h2>{roomFromLink?'Join your classroom':'Start a classroom'}</h2><p>{roomFromLink?'Choose an alias, review sharing, then consent to join.':'Create a session and invite your students.'}</p>
+                <form onSubmit={enter} aria-busy={busy}>{roomFromLink?<label>Display alias (avoid your full name)<input required maxLength={100} autoComplete="off" value={studentName} onChange={e=>setStudentName(e.target.value)}/></label>:<><label>Classroom name<input required maxLength={100} placeholder="e.g. Mathematics · Grade 10" value={roomName} onChange={e=>setRoomName(e.target.value)}/></label><label>Administrator password<input required type="password" maxLength={256} autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label></>}
+                {roomFromLink&&<>{!invitationToken&&<p role="alert" className="notice">This invitation is incomplete. Ask your teacher for the full invitation link, including its invitation token.</p>}<label>Student privacy mode<select value={privacyMode} onChange={e=>setPrivacyMode(e.target.value)}><option value="telemetry-only">Telemetry only — no student media transmitted</option><option value="mesh">Synthetic facial mesh video shared</option></select></label><p className="small">Landmarks, mesh and identifiable telemetry can reveal sensitive behavior. This is not anonymous. Data is retained for up to {config?.retention_days || 7} days; you can delete your session. No raw webcam video is shared. Optional mic analysis stays local.</p><label><input type="checkbox" required checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to local camera analysis and sharing derived observations in my selected mode.</label></>}
+                <button className="primary" disabled={busy||!config||(Boolean(roomFromLink)&&(!consent||!invitationToken))}>{busy?'Connecting…':roomFromLink?'Join classroom →':'Launch classroom →'}</button></form><p className="small">{!config?'Connecting to the classroom service…':'Camera access starts after consent and joining. Microphone access requires a separate opt-in in the classroom.'}</p>
+            </section></main>:<main id="main" className="classroom"><div className="classroom-heading"><div><p className="eyebrow">{closed?(closureReason==='ended'?'SESSION CONCLUDED':'MONITORING PAUSED'):session.role==='teacher'?'TEACHER CONSOLE':'STUDENT CLASSROOM'}</p><h1>{session.name}</h1></div><button className="secondary" onClick={exit} disabled={busy}>{busy?'Saving…':session.role==='teacher'?(closed?'New classroom':'End classroom'):'Leave classroom'}</button></div>
             {session.role==='teacher'&&<div className="invitation"><div><span className="step-label">INVITE YOUR STUDENTS</span><code>{invitation}</code></div><button className="secondary" onClick={()=>navigator.clipboard.writeText(invitation).then(()=>setCopyLabel('Copied!')).catch(()=>setError('Copy the invitation text manually.'))}>{copyLabel}</button></div>}
+            {session.role==='student'&&!closed&&<StudentGuidance mode={session.privacy_mode}/>}
+            {!closed&&session.role==='student'&&!verified&&<p role="status">Verifying your session before starting the camera…</p>}
             {!closed&&config&&(session.role==='teacher'||verified)&&<Classroom session={session} config={config} onTelemetry={telemetry} onError={reportError}/>}
-            {closed&&<div className="notice">The teacher has ended this classroom. Camera and microphone capture have stopped.</div>}
-            {session.role==='teacher'?<><section className="metric-grid"><div><span>Students online</span><strong>{online.length}</strong></div><div><span>Total joined</span><strong>{roster.length}</strong></div><div><span>Live engagement average</span><strong>{percent(average)}</strong></div></section><section className="report-panel"><div className="panel-heading"><div><p className="eyebrow">CLASSROOM ANALYTICS</p><h2>{closed?'Session summary':'Participation overview'}</h2></div><button className="secondary" onClick={download}>Download CSV ↓</button></div><div className="table-wrap"><table><thead><tr><th>Student</th><th>Presence</th><th>Latest observation</th><th>Session average</th><th>Summary</th><th>Validated presence</th><th>Unobserved while connected</th><th>Disconnected gaps</th><th>Samples</th></tr></thead><tbody>{roster.map(row=><tr key={row.id}><td>{row.name}</td><td><span className={row.online?'online':'offline'}>{row.online?'Online':'Offline'}</span></td><td>{row.latest?.status||'Awaiting observation'}</td><td>{percent(row.avg_cei)}</td><td>{row.primary_state}</td><td>{Math.floor(row.duration_seconds/60)}m {Math.floor(row.duration_seconds%60)}s</td><td>{Math.round(row.unobserved_seconds)}s</td><td>{Math.round(row.disconnected_seconds)}s</td><td>{row.total_samples}</td></tr>)}</tbody></table>{!roster.length&&<p className="empty">Your students will appear here when they join.</p>}</div></section></>:<section className="report-panel"><div className="panel-heading"><div><p className="eyebrow">YOUR SESSION</p><h2>Engagement timeline</h2></div><span className="small">{pending?`${pending} samples waiting to sync`:'Delivered samples saved'}</span></div>{samples.length?<><div className="timeline" aria-label="Recent engagement scores">{samples.map(row=><div key={row.sample_id} title={`${row.status}: ${percent(row.cei_score)}`} style={{height:row.is_unknown?'4px':`${Math.max(3,row.cei_score*100)}%`}}/>)}</div><p className="small">Latest: {samples.at(-1)?.status}. Behavioral observations are estimates, not proof of attention.</p></>:<p className="empty">Waiting for your first camera observation.</p>}</section>}
+            {closed&&<div className="notice">{closureReason==='ended'?'The teacher has ended this classroom. Camera and microphone capture have stopped.':'Session access could not be verified. Camera and microphone capture have stopped. Check your connection and reload to verify the session; queued observations are retained.'}</div>}
+            {session.role==='teacher'?<><section className="metric-grid"><div><span>Students online</span><strong>{online.length}</strong></div><div><span>Total joined</span><strong>{roster.length}</strong></div><div><span>Live visual heuristic</span><strong>{percent(average)}</strong></div></section><section className="report-panel"><ObservationGuide/><details className="guidance"><summary>Class trend during this visit</summary><p className="small">Each point is the mean of available latest observations for online participants at a roster refresh. Repeated observations may appear in multiple snapshots; this is not a historical session average.</p><Trend samples={classTrend} title="Live class snapshots"/></details><div className="panel-heading"><div><p className="eyebrow">CLASSROOM ANALYTICS</p><h2>{closed?'Session summary':'Participation overview'}</h2></div><button className="secondary" disabled={reportBusy} onClick={download}>{reportBusy?'Preparing report…':'Download CSV ↓'}</button></div><p className="small" role="status">{lastUpdated?`Attendance updated ${new Date(lastUpdated).toLocaleTimeString()}; refreshes every 5 seconds while active.`:'Loading attendance…'} {known.length} online students have a measured latest observation; {online.length-known.length} have unknown data.</p><div className="roster-filters"><label>Find alias<input type="search" value={filter} onChange={e=>setFilter(e.target.value)}/></label><label>Connection<select aria-label="Connection filter" value={presence} onChange={e=>setPresence(e.target.value)}><option value="all">All participants</option><option value="online">Online</option><option value="offline">Offline</option></select></label></div><div className="table-wrap" tabIndex={0} role="region" aria-label="Class attendance"><table><caption>Attendance and visual observations — scroll horizontally for all columns</caption><thead><tr><th>Student</th><th>Presence</th><th>Latest observation</th><th>Heuristic average</th><th>Summary</th><th>Validated presence</th><th>Unobserved while connected</th><th>Disconnected gaps</th><th>Samples</th></tr></thead><tbody>{filteredRoster.map(row=><tr key={row.id}><td>{row.name}</td><td><span className={row.online?'online':'offline'}>{row.online?'Online':'Offline'}</span></td><td>{observationLabel(row.latest?.status,row.latest?.is_unknown)}</td><td>{percent(row.avg_cei)}</td><td>{observationLabel(row.primary_state)}</td><td>{duration(row.duration_seconds)}</td><td>{Math.round(row.unobserved_seconds)}s</td><td>{Math.round(row.disconnected_seconds)}s</td><td>{row.total_samples}</td></tr>)}</tbody></table>{!filteredRoster.length&&<p className="empty">{roster.length?'No participants match these filters.':'Your students will appear here when they join. Share the invitation above.'}</p>}</div></section></>:<section className="report-panel"><div className="panel-heading"><div><p className="eyebrow">YOUR SESSION</p><h2>Observation timeline</h2></div><span className="small">{pending?`${pending} samples waiting to sync`:'Delivered samples saved'}</span></div><ObservationGuide/>{samples.length?<Trend samples={samples}/>:<p className="empty">Waiting for your first camera observation. If camera access is denied, observations remain unknown; you can still watch the lecture.</p>}</section>}
         </main>}
         {session&&<button className="secondary" disabled={busy} onClick={eraseData}>{session.role==='teacher'?'End and delete this classroom’s data':'Withdraw and delete my session data'}</button>}
         <footer>EduGuard · Local inference. Shared learning.<span>Raw student video stays on device.</span></footer>

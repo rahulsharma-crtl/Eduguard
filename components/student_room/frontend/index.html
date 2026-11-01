@@ -359,6 +359,9 @@
             background: #fee2e2;
             transform: translateY(-1px);
         }
+    button:focus-visible, summary:focus-visible {outline: 3px solid #b2a4ff; outline-offset: 3px;}
+        button {min-height: 44px;}
+        @media(max-width:520px) {body {padding: 10px;} .header {flex-wrap:wrap;gap:12px;} .controls {flex-wrap:wrap;} .ctrl-btn {white-space:normal;} table {min-width:560px;} .telemetry-strip {grid-template-columns:1fr 1fr;} }
     </style>
 </head>
 <body>
@@ -393,6 +396,7 @@
                     <span id="teacher_stream_tag" style="color: var(--warn-color); font-size: 0.75rem;">Waiting for feed...</span>
                 </div>
                 <div class="video-box">
+                    <p id="media_network_notice" role="status" hidden></p>
                     <video id="teacher_feed" autoplay playsinline controls></video>
                     <button id="resume_lecture_btn" class="ctrl-btn" hidden style="position:absolute;z-index:20;left:16px;top:16px;">▶ Play lecture / enable audio</button>
                     <div class="feed-overlay">
@@ -437,29 +441,29 @@
         <!-- Bottom Telemetry HUD Strip -->
         <div class="telemetry-strip">
             <div class="metric-cell">
-                <span class="metric-label">Composite Engagement</span>
-                <span class="metric-value" id="val_cei">100.0%</span>
+                <span class="metric-label">Visual heuristic</span>
+                <span class="metric-value" id="val_cei">Unknown</span>
                 <div class="metric-progress">
-                    <div class="progress-bar" id="bar_cei" style="width: 100%;"></div>
+                    <div class="progress-bar" id="bar_cei" style="width: 0%;"></div>
                 </div>
             </div>
             <div class="metric-cell">
-                <span class="metric-label">Spatial Attentiveness</span>
-                <span class="metric-value" id="val_att">100.0%</span>
+                <span class="metric-label">Head orientation heuristic</span>
+                <span class="metric-value" id="val_att">Unknown</span>
                 <div class="metric-progress">
-                    <div class="progress-bar" id="bar_att" style="width: 100%; background: var(--success-color);"></div>
+                    <div class="progress-bar" id="bar_att" style="width: 0%; background: var(--success-color);"></div>
                 </div>
             </div>
             <div class="metric-cell">
                 <span class="metric-label">Eye Aspect Ratio (EAR)</span>
-                <span class="metric-value" id="val_ear">0.32</span>
+                <span class="metric-value" id="val_ear">Unknown</span>
                 <div class="metric-progress">
-                    <div class="progress-bar" id="bar_ear" style="width: 70%; background: #00E5FF;"></div>
+                    <div class="progress-bar" id="bar_ear" style="width: 0%; background: #00E5FF;"></div>
                 </div>
             </div>
             <div class="metric-cell">
-                <span class="metric-label">Engagement Status</span>
-                <span class="metric-value" id="val_status" style="font-size: 1.05rem; color: #4ade80;">Attentive</span>
+                <span class="metric-label">Visual observation</span>
+                <span class="metric-value" id="val_status" style="font-size: 1.05rem; color: #4ade80;">Awaiting observation</span>
             </div>
         </div>
     </div>
@@ -484,6 +488,7 @@
         const privacyCanvas = document.getElementById("privacy_canvas");
         const ctx = privacyCanvas.getContext("2d");
         const teacherFeed = document.getElementById("teacher_feed");
+        teacherFeed.addEventListener("playing", () => { document.getElementById("media_network_notice").hidden = true; });
         const resumeLectureBtn = document.getElementById("resume_lecture_btn");
         resumeLectureBtn.addEventListener('click', async () => {
             teacherFeed.muted = false;
@@ -541,6 +546,7 @@
         let signalingOptions = null;
         let peer = null;
         let activeCall = null;
+        let mediaConnectTimer = null;
         let currentRoomId = null;
         let currentStudentName = "Student";
 
@@ -784,27 +790,27 @@
                 barATT.style.width = `${frameAnalysis.attentiveness * 100}%`;
                 valEAR.innerText = (frameAnalysis.ear !== null ? frameAnalysis.ear.toFixed(2) : "0.00");
                 barEAR.style.width = `${Math.min(100, ((frameAnalysis.ear || 0) / 0.4) * 100)}%`;
-                valStatus.innerText = frameAnalysis.status;
+                valStatus.innerText = frameAnalysis.status.replace(/Drowsy \(Eyes Closed\)/g, 'Eyes closed').replace(/Subject Absent/g, 'Face not detected').replace(/Attentive/g, 'Face oriented toward camera');
 
                 if (frameAnalysis.status === "Subject Absent") {
                     valStatus.style.color = "var(--danger-color)";
-                    kinematicsTag.innerText = "👤 Subject Absent";
+                    kinematicsTag.innerText = "Face not detected";
                 } else if (frameAnalysis.is_drowsy) {
                     valStatus.style.color = "var(--danger-color)";
-                    kinematicsTag.innerText = "⚠️ Alert: Prolonged Eye Closure";
+                    kinematicsTag.innerText = "Prolonged eye closure observed";
                 } else if (frameAnalysis.audio_evasion) {
                     valStatus.style.color = "var(--danger-color)";
                     kinematicsTag.innerText = "Optional audio observation";
                 } else if (frameAnalysis.is_looking_down) {
                     // Pedagogical observable state: Reading textbook, taking notes, or writing
                     valStatus.style.color = "#3b82f6";
-                    kinematicsTag.innerText = "📖 Observable Pose: Looking Down (Notes / Reading)";
+                    kinematicsTag.innerText = "📖 Observable Pose: Looking Down";
                 } else if (frameAnalysis.is_looking_away || frameAnalysis.is_looking_up) {
                     valStatus.style.color = "var(--warn-color)";
-                    kinematicsTag.innerText = "⚠️ Alert: Gaze Divergent";
+                    kinematicsTag.innerText = "Head oriented away from camera";
                 } else {
                     valStatus.style.color = "var(--success-color)";
-                    kinematicsTag.innerText = "🧑‍🎓 Privacy Mesh Active (Attentive)";
+                    kinematicsTag.innerText = "Face oriented toward camera";
                 }
             }
 
@@ -994,7 +1000,8 @@
                     virtualCanvasStream.getVideoTracks().forEach(track => canvasTrackIds.add(track.id));
                     readinessState.canvasStream = 'ready';
                     audioObservationLabel.textContent = "Audio unavailable; camera/microphone initialization failed. No inference is made.";
-                    setConnectionStatus("alert", "Camera/Mic unavailable. Check browser permissions and devices.");
+                    setConnectionStatus("alert", "Camera unavailable. Watching the lecture remains available; observations are unknown.");
+                    checkAndEstablishConnection();
                 } finally {
                     isLocalStreamInitializing = false;
                 }
@@ -1194,6 +1201,17 @@
             }
 
             const thisCall = activeCall;
+            mediaConnectTimer = setTimeout(() => {
+                mediaConnectTimer = null;
+                if (activeCall !== thisCall || (thisCall.peerConnection?.connectionState === 'connected' && teacherFeed.videoWidth > 0)) return;
+                readinessState.teacherStream = 'error';
+                cleanupActiveCall();
+                scheduleCallReconnect(teacherPeerId);
+                setConnectionStatus('alert', 'Video connection timed out. This network may require a TURN relay.');
+                const notice = document.getElementById('media_network_notice');
+                notice.textContent = 'Video connection timed out. This network may require a TURN relay.'; notice.hidden = false;
+                teacherStreamTag.innerText = 'Media unavailable — check network / TURN';
+            }, 15000);
             const mediaConnection = thisCall.peerConnection;
             if (mediaConnection) {
                 mediaConnection.addEventListener('connectionstatechange', () => {
@@ -1239,6 +1257,7 @@
         }
 
         function cleanupActiveCall() {
+            if (mediaConnectTimer) { clearTimeout(mediaConnectTimer); mediaConnectTimer = null; }
             if (activeCall) {
                 const closingCall = activeCall;
                 activeCall = null;

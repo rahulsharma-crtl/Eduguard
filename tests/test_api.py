@@ -185,3 +185,13 @@ def test_late_recovery_preserves_events_without_reopening_completed_session(clie
     assert response.json()['rejected_event_ids']==[after['sample_id']]
     assert client.post(path+'/delete-data',json={},headers=auth(one)).status_code==200
     assert client.post(path+'/recover-telemetry',json={'resume_ticket':one['resume_ticket'],'samples':[recorded]}).status_code==404
+
+def test_expired_signed_access_and_invitation_tokens_are_rejected(client, monkeypatch):
+    from itsdangerous.timed import TimestampSigner
+    room = create_room(client)
+    monkeypatch.setattr(TimestampSigner, 'get_timestamp', lambda self: int(time.time()) + 43201)
+    assert client.get(f"/rooms/{room['room_id']}/roster", headers=auth(room)).status_code == 401
+    response = client.post(f"/rooms/{room['room_id']}/join", json={
+        'name': 'Alias', 'client_id': str(uuid.uuid4()), 'invitation': room['invitation'],
+        'consent': True, 'privacy_mode': 'telemetry-only'})
+    assert response.status_code == 403

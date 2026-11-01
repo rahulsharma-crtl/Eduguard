@@ -1,0 +1,6 @@
+{
+  "status": "unmeasured",
+  "reason": "No consented real-world labeled dataset supplied. Synthetic fixtures are tests only.",
+  "engineHash": "218a0bc5a50e03272228c3e0c0e95686038837b722b257b185e8369f569eb9f7",
+  "evaluatorHash": "f162bccfd0425cddb48fb30c64233dd1e481b21487254cd92d0e8905c527abd9"
+}

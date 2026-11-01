@@ -3,6 +3,20 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: eduguard_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: disposable_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d eduguard_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,6 +30,8 @@ jobs:
       - run: npm run test:js
       - run: npm run lint:js
       - run: python -m pytest -q
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://test_user:disposable_ci_password@localhost:5432/eduguard_test
       - run: npm run build
         env:
           VITE_API_URL: http://localhost:8000

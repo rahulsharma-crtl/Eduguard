@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { EngagementEngine, BEHAVIORAL_STATES } from '../core/engagement.mjs';
 
 export function evaluate(dataset) {
+    if(dataset.schemaVersion===2)throw Error('Schema v2 requires the participant-disjoint workflow: --rigorous evaluate --dataset ... --split ... --lock ... (see evaluation/README.md).');
     if (dataset.source !== 'real-video' || dataset.consentConfirmed !== true || !dataset.clips?.length)
         throw new Error('Provide consented real-video clips, not synthetic landmarks.');
     const classes = Object.values(BEHAVIORAL_STATES);
@@ -36,8 +37,13 @@ export function evaluate(dataset) {
         missingClasses: classes.filter(c => !perClass[c].support), confusion, perClass };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    if (process.argv[2] === '--rigorous') {
+        process.argv.splice(2,1);
+        const {main}=await import('../evaluation/run.mjs'); main();
+    } else {
     if (!process.argv[2]) throw new Error('Usage: npm run benchmark:video -- dataset.json [report.json]');
     const report = evaluate(JSON.parse(readFileSync(process.argv[2], 'utf8')));
     if (process.argv[3]) writeFileSync(process.argv[3], JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
+}
 }

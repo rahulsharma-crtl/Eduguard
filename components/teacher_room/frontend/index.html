@@ -386,6 +386,9 @@
             box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
             animation: pulse 1.5s infinite;
         }
+    button:focus-visible, summary:focus-visible {outline: 3px solid #b2a4ff; outline-offset: 3px;}
+        button {min-height: 44px;}
+        @media(max-width:520px) {body {padding: 10px;} .header {flex-wrap:wrap;gap:12px;} .controls {flex-wrap:wrap;} .ctrl-btn {white-space:normal;} table {min-width:560px;} .telemetry-strip {grid-template-columns:1fr 1fr;} }
     </style>
 </head>
 <body>
@@ -449,7 +452,7 @@
                                 <td colspan="4" class="empty-roster-msg">
                                     <div style="font-size: 1.5rem; margin-bottom: 6px;">🎓</div>
                                     <div>Waiting for students to join classroom...</div>
-                                    <div style="font-size: 0.75rem; color: #586069; margin-top: 4px;">Connected student names and live attention statuses will appear in this table.</div>
+                                    <div style="font-size: 0.75rem; color: #586069; margin-top: 4px;">Connected student names and live visual observations will appear in this table.</div>
                                 </td>
                             </tr>
                         </tbody>
@@ -779,7 +782,7 @@
                 <td class="time-joined-cell">${joinTime}</td>
                 <td>
                     <div class="student-telemetry-badge badge-attentive" id="badge-${peerId}">
-                        <span>🎯 100% | Attentive</span>
+                        <span>Awaiting observation</span>
                     </div>
                 </td>
             `;
@@ -872,9 +875,9 @@
                 connectedStudents.get(matchedPeerId).lastSeen = Date.now();
             }
 
-            const statusText = data.status || "Attentive";
-            const safeStatus = escapeHtml(statusText);
-            const isUnknown = Boolean(data.is_unknown) || statusText.toLowerCase().includes("insufficient") || statusText.toLowerCase().includes("unknown");
+            const statusText = data.status || "Unknown";
+            const safeStatus = escapeHtml(statusText.replace(/Drowsy \(Eyes Closed\)/g, 'Eyes closed').replace(/Subject Absent/g, 'Face not detected').replace(/Attentive/g, 'Face oriented toward camera'));
+            const isUnknown = Boolean(data.is_unknown) || !Number.isFinite(data.cei ?? data.cei_score) || statusText.toLowerCase().includes("insufficient") || statusText.toLowerCase().includes("unknown");
 
             badge.classList.remove("badge-attentive", "badge-warning", "badge-alert");
 
@@ -884,7 +887,7 @@
                 return;
             }
 
-            const ceiRaw = (data.cei !== undefined) ? data.cei : (data.cei_score !== undefined ? data.cei_score : 1.0);
+            const ceiRaw = (data.cei !== undefined) ? data.cei : (data.cei_score !== undefined ? data.cei_score : null);
             const ceiPct = Math.round(ceiRaw * 100);
             const isDrowsy = data.isDrowsy || data.is_drowsy || statusText.toLowerCase().includes("drowsy");
             const isLookingDown = data.isLookingDown || data.is_looking_down || statusText.toLowerCase().includes("down");
@@ -893,16 +896,16 @@
 
             if (isSideChannelSpeech || isDrowsy || statusText.toLowerCase().includes("absent") || ceiPct < 40) {
                 badge.classList.add("badge-alert");
-                badge.innerHTML = `<span>🚨 ${ceiPct}% | ${safeStatus}</span>`;
+                badge.innerHTML = `<span>${ceiPct}% | ${safeStatus}</span>`;
             } else if (isDistracted || ceiPct < 70) {
                 badge.classList.add("badge-warning");
-                badge.innerHTML = `<span>⚠️ ${ceiPct}% | ${safeStatus}</span>`;
+                badge.innerHTML = `<span>${ceiPct}% | ${safeStatus}</span>`;
             } else if (isLookingDown) {
                 badge.classList.add("badge-attentive");
                 badge.innerHTML = `<span>📖 ${ceiPct}% | ${safeStatus}</span>`;
             } else {
                 badge.classList.add("badge-attentive");
-                badge.innerHTML = `<span>🎯 ${ceiPct}% | ${safeStatus}</span>`;
+                badge.innerHTML = `<span>${ceiPct}% | ${safeStatus}</span>`;
             }
         }
 
