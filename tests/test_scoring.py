@@ -1,9 +1,14 @@
+"""Historical/copied formula fixtures, not execution of the production JS engine.
+
+These tests retain audit reproductions and Python reference calculations.
+Current engine behavior is exercised in tests/js/scoring.test.mjs.
+"""
 import pytest
 from config import CONFIG
 
 
 def calculate_raw_cei(presence: float, attentiveness: float, distraction: float) -> float:
-    """Formula as implemented in student_room/frontend/index.html line 719:
+    """Historical formula copied from an earlier student frontend:
     const rawCEI = (0.30 * presence) + (0.45 * attentiveness) - (0.25 * distraction);
     let ceiScore = Math.max(0.0, Math.min(1.0, rawCEI));
     """
@@ -15,25 +20,26 @@ def calculate_raw_cei(presence: float, attentiveness: float, distraction: float)
 
 def test_max_attainable_cei_score_defect():
     """
-    VERIFIED DEFECT:
+    Historical defect reproduction in the copied formula below:
     Even with full presence (1.0), perfect attentiveness (1.0), and zero distraction (0.0),
     the formula produces 0.75 (75%), NEVER 1.0 (100%).
-    This causes students with 100% focus to receive an artificial 25% ceiling penalty.
+    This reproduces the old mathematical ceiling; it does not measure attention
+    or describe the current production engine.
     """
     score = calculate_raw_cei(presence=1.0, attentiveness=1.0, distraction=0.0)
-    # The expected mathematical ceiling under the current formula is 0.75, not 1.0.
+    # The expected mathematical ceiling under this historical copied formula is 0.75, not 1.0.
     assert score == pytest.approx(0.75, abs=1e-4), f"Expected 0.75 max score, got {score}"
     assert score < 1.0, "Score unexpectedly reached 1.0 despite formula deficit"
 
 
 def test_config_weights_sum_to_one():
     """
-    Verifies the relationship in config.py weights:
+    Pins the legacy config.py weights used by these Python fixtures:
     WEIGHT_PRESENCE: 0.30
     WEIGHT_ATTENTIVENESS: 0.45
     WEIGHT_DISTRACTION: 0.25
-    The sum is 1.0, but distraction is subtracted instead of inverted (1 - distraction),
-    which is why the max score is 0.75 instead of 1.00.
+    The historical raw fixture subtracts distraction and caps its ideal score at
+    0.75. The corrected Python reference below is also copied test logic, not JS.
     """
     total = CONFIG.WEIGHT_PRESENCE + CONFIG.WEIGHT_ATTENTIVENESS + CONFIG.WEIGHT_DISTRACTION
     assert total == pytest.approx(1.0, abs=1e-4)
@@ -65,7 +71,7 @@ def calculate_normalized_cei(
 
 
 def test_normalized_cei_ideal_attention():
-    """Verify ideal attention reaches 1.0 (100%) under normalized formula."""
+    """Check that the copied normalized reference returns 1.0 for ideal inputs."""
     score = calculate_normalized_cei(
         presence=1.0, attentiveness=1.0, distraction=0.0
     )

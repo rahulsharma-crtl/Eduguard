@@ -547,6 +547,7 @@
         let peer = null;
         let activeCall = null;
         let mediaConnectTimer = null;
+        let signalingReconnectTimer = null;
         let currentRoomId = null;
         let currentStudentName = "Student";
 
@@ -1064,9 +1065,19 @@
             peer.on("disconnected", () => {
                 console.warn("PeerJS disconnected from signaling server.");
                 readinessState.peerSignaling = 'connecting';
-                if (peer && !peer.destroyed) {
-                    try { peer.reconnect(); } catch (_) {}
-                }
+                // Let the previous signaling socket close before registering the same ID.
+                // Immediate reconnect can race the server's old-socket cleanup.
+                const disconnectedPeer = peer;
+                clearTimeout(signalingReconnectTimer);
+                signalingReconnectTimer = setTimeout(() => {
+                    signalingReconnectTimer = null;
+                    if (peer !== disconnectedPeer || !peer || peer.destroyed || !peer.disconnected) return;
+                    try { peer.reconnect(); } catch (error) {
+                        console.warn('Signaling reconnect failed:', error);
+                        readinessState.peerSignaling = 'error';
+                        setConnectionStatus('alert', 'Signaling reconnect failed. Click status to retry.');
+                    }
+                }, 500);
             });
 
             peer.on("close", () => {
@@ -1282,6 +1293,8 @@
         }
 
         function cleanupPeer() {
+            clearTimeout(signalingReconnectTimer);
+            signalingReconnectTimer = null;
             if (callRetryTimer) {
                 clearTimeout(callRetryTimer);
                 callRetryTimer = null;

@@ -1,5 +1,7 @@
 # Frontend audit and improvements
 
+> **Historical frontend-change snapshot.** This records the feature audit, changes and test results at the time of that work. Test counts and implementation statements are not continuously updated and do not verify the deployed version. See [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md) for active source paths and [README.md](README.md) for current setup.
+
 Reviewed the running React entry point (`web/src/main.jsx`), stylesheet, student and teacher iframe UIs, existing browser tests, and the roster response fields before implementation.
 
 ## Existing features preserved
