@@ -1,3 +1,5 @@
+> Reconnect follow-up: student signaling now waits 500 ms before reconnecting the same peer, avoiding immediate old/new socket overlap. Cleanup cancels the timer, and callbacks reject replaced/destroyed/already-connected peers. The unchanged full browser suite now passes 12/12 locally; JavaScript passes 79/79 and Python lifecycle checks pass 7/7. Build, syntax and diff checks pass. These results supersede the reconnect failure status below for this local revision; remote CI has not yet run this fix. No engine, media-track, authentication or database behavior was changed.
+
 > Audio correction: narration is now required. Missing or failed speech interrupts capture before the next measurement. Speech timeout is 10 seconds; total capture limit remains 100 seconds. Earlier text-only continuation instructions are superseded. Verification before push: all 77 JavaScript tests and all four research browser tests pass, including mandatory-narration interruption. The production build passed.
 
 # Research Validation UI implementation and checks
