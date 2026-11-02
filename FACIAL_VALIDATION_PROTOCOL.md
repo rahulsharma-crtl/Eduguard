@@ -1,3 +1,5 @@
+> Current navigation: Research Validation is always visible as a link in the existing teacher login card, above the sign-in controls. No VITE_RESEARCH_VALIDATION_ENABLED setting is needed. Earlier flag-based navigation instructions below are superseded. The existing header and classroom layout are retained.
+
 > Audio correction: narration is now required. Missing or failed speech interrupts capture before the next measurement. Speech timeout is 10 seconds; total capture limit remains 100 seconds. Earlier text-only continuation instructions are superseded. Verification before push: all 77 JavaScript tests and all four research browser tests pass, including mandatory-narration interruption. The production build passed.
 
 # Facial Validation Mode — supervised pilot protocol
