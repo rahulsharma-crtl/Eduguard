@@ -33,7 +33,7 @@ try:
                     if response.status == 200: break
             except OSError: time.sleep(0.1)
         else: raise RuntimeError(f'Service readiness timed out: {url}')
-    print('All three services are healthy. Open http://localhost:5173; password is in .env.local')
+    print('All three services are healthy. Open http://localhost:5173; create a teacher account or sign in with your own username and password.')
     if not args.check:
         while all(process.poll() is None for process in processes): time.sleep(0.5)
 except KeyboardInterrupt:

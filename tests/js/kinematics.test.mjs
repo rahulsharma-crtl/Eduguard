@@ -1,7 +1,9 @@
+// Historical copied-function fixtures; these do not import the current engine.
+// The old pitch defect below is intentionally reproduced, not a current bug claim.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// Logic from components/student_room/frontend/index.html lines 539-559:
+// Historical copied EAR helper from an earlier student frontend:
 function ptDist(p1, p2) {
     const dx = (p1.x - p2.x) * 640;
     const dy = (p1.y - p2.y) * 480;
@@ -24,7 +26,7 @@ function computeEAR(landmarks, indices) {
     return (v1 + v2) / (2.0 * h);
 }
 
-// Logic from components/student_room/frontend/index.html lines 644-656:
+// Historical copied pitch-ratio helper from an earlier student frontend:
 function computePitchPose(forehead, nose, chin) {
     const dTop = Math.abs(nose.y - forehead.y);
     const dBot = Math.abs(chin.y - nose.y);
@@ -40,7 +42,7 @@ function computePitchPose(forehead, nose, chin) {
     return { pitchRatio, isLookingDown, statusStr };
 }
 
-test('computeEAR handles zero eye width gracefully without NaN or ZeroDivisionError', () => {
+test('Historical copied computeEAR handles zero eye width gracefully without NaN or ZeroDivisionError', () => {
     const landmarks = {
         0: { x: 0.5, y: 0.5 },
         1: { x: 0.5, y: 0.5 },
@@ -53,7 +55,7 @@ test('computeEAR handles zero eye width gracefully without NaN or ZeroDivisionEr
     assert.equal(ear, 0.0);
 });
 
-test('computePitchPose defect: Looking UP triggers isLookingDown = true and status "Looking Down"', () => {
+test('Historical copied pitch defect: Looking UP triggers isLookingDown = true and status "Looking Down"', () => {
     // Looking up: forehead moves up and back; nose is high close to forehead; chin is far below
     // forehead.y = 0.20, nose.y = 0.24, chin.y = 0.60
     // dTop = |0.24 - 0.20| = 0.04
@@ -66,7 +68,7 @@ test('computePitchPose defect: Looking UP triggers isLookingDown = true and stat
     );
 
     assert.ok(result.pitchRatio < 0.45);
-    // VERIFIED DEFECT: Pitch ratio < 0.45 means looking UP, but code flags isLookingDown = true!
+    // Historical fixture defect: Pitch ratio < 0.45 means looking UP, but code flags isLookingDown = true!
     assert.equal(result.isLookingDown, true);
     assert.equal(result.statusStr, "Looking Down");
 });

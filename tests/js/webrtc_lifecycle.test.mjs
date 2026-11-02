@@ -1,3 +1,8 @@
+// Historical mock/reference lifecycle tests. These simulate local test models;
+// they do not prove behavior of the production HTML, RTCPeerConnections or network.
+// Audio-bearing fixtures preserve older behavior for regression history. The
+// current student client never sends mic tracks; actual coverage lives in
+// tests/js/privacy.test.mjs and tests/browser/webrtc.test.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -109,7 +114,7 @@ class MockElement {
 }
 
 // --- Test 1: Teacher Roster Audio Bug Verification & Fix ---
-test('Teacher roster: audio element must be appended AFTER row.innerHTML to avoid deletion', () => {
+test('Historical DOM model: append audio after innerHTML to avoid deletion', () => {
     // 1. Simulating the BUG: append audioElem, then assign row.innerHTML
     const bugRow = new MockElement('tr');
     const audioStream = new MockMediaStream([new MockMediaStreamTrack('audio', 'student-mic')]);
@@ -138,8 +143,8 @@ test('Teacher roster: audio element must be appended AFTER row.innerHTML to avoi
     assert.equal(fixedAudio.srcObject, audioStream, 'Audio element is bound to student audio stream');
 });
 
-// --- Test 2: Core Privacy Guarantee: Only synthetic canvas video is transmitted ---
-test('Core Privacy: Student transmits synthetic canvas video + mic audio, NEVER raw webcam pixels', () => {
+// --- Test 2: Historical audio-bearing fixture; not the current outbound policy ---
+test('Historical audio-bearing fixture: canvas video excludes raw camera video', () => {
     const rawWebcamVideoTrack = new MockMediaStreamTrack('video', 'raw-physical-webcam');
     const microphoneAudioTrack = new MockMediaStreamTrack('audio', 'usb-microphone');
     const syntheticCanvasVideoTrack = new MockMediaStreamTrack('video', 'privacy-canvas-wireframe');
@@ -147,7 +152,7 @@ test('Core Privacy: Student transmits synthetic canvas video + mic audio, NEVER 
     const localUserMedia = new MockMediaStream([rawWebcamVideoTrack, microphoneAudioTrack]);
     const virtualCanvasStream = new MockMediaStream([syntheticCanvasVideoTrack]);
 
-    // Student mic is attached to canvas stream
+    // Historical fixture attaches a mic; current production code must not do this.
     const audioTracks = localUserMedia.getAudioTracks();
     if (audioTracks.length > 0) {
         virtualCanvasStream.addTrack(audioTracks[0]);
@@ -170,7 +175,7 @@ test('Core Privacy: Student transmits synthetic canvas video + mic audio, NEVER 
 });
 
 // --- Test 3: Normal Joining & Explicit Readiness States ---
-test('Lifecycle: Normal joining initiates call only when all readiness prerequisites are ready', () => {
+test('Mock lifecycle: joining requires all modeled readiness prerequisites', () => {
     const readinessState = {
         webcam: 'idle',
         faceMesh: 'idle',
@@ -228,7 +233,7 @@ test('Lifecycle: Normal joining initiates call only when all readiness prerequis
 });
 
 // --- Test 4: Delayed Permissions (Race Condition Resolution) ---
-test('Lifecycle: Delayed user permissions prevents premature call and connects once granted', async () => {
+test('Mock lifecycle: delayed permissions defer the modeled call', async () => {
     const readinessState = {
         webcam: 'idle',
         faceMesh: 'idle',
@@ -288,7 +293,7 @@ test('Lifecycle: Delayed user permissions prevents premature call and connects o
 });
 
 // --- Test 5: Bounded Reconnection with Exponential Backoff ---
-test('Lifecycle: Bounded reconnection with exponential backoff on teacher disconnect', () => {
+test('Mock lifecycle: bounded exponential reconnection', () => {
     const ReconnectConfig = {
         maxCallRetries: 5,
         baseCallDelayMs: 1000,
@@ -318,7 +323,7 @@ test('Lifecycle: Bounded reconnection with exponential backoff on teacher discon
 });
 
 // --- Test 6: Refresh and Cleanup of Tracks & Connections ---
-test('Lifecycle: Refresh / unload triggers complete cleanup of tracks and peer connections', () => {
+test('Mock lifecycle: teardown stops modeled tracks and peers', () => {
     const micTrack = new MockMediaStreamTrack('audio', 'mic');
     const camTrack = new MockMediaStreamTrack('video', 'cam');
     const localUserMedia = new MockMediaStream([micTrack, camTrack]);
@@ -353,7 +358,7 @@ test('Lifecycle: Refresh / unload triggers complete cleanup of tracks and peer c
 });
 
 // --- Test 7: Multiple Students Roster Concurrency ---
-test('Teacher roster: Handles multiple concurrent students without audio collision or leakage', () => {
+test('Historical roster model: separate audio elements for multiple fixtures', () => {
     const connectedStudents = new Map();
     const rosterTbody = new MockElement('tbody');
 
@@ -412,7 +417,7 @@ test('Teacher roster: Handles multiple concurrent students without audio collisi
 });
 
 // --- Test 8: Accurate Measured Broadcast Resolution Labels ---
-test('UI Accuracy: Correct measured resolution labels (never false 1080p claim)', () => {
+test('Copied badge helper: resolution-dependent labels', () => {
     function computeBadgeText(width, height) {
         if (height >= 1080 || width >= 1920) {
             return "1080p Full HD Broadcast";

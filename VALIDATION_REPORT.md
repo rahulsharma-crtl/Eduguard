@@ -1,5 +1,7 @@
 # EduGuard production-readiness verification
 
+> **Historical verification snapshot — November 1, 2026 observations and subsequent account addendum.** Results, deployment responses, test counts and unresolved checks below apply to the versions and environments explicitly recorded. They are not a live service-status report or production-readiness certification. Later account/password changes supersede older setup statements. See [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md) and [TEACHER_ACCOUNTS.md](TEACHER_ACCOUNTS.md); rerun verification for a new deployment.
+
 Verified **2026-11-01**. Scope: existing React/Vite frontend, FastAPI API, PeerJS service and PostgreSQL deployment configuration. No Streamlit or architecture replacement. Original verification baseline was commit `53c4b60` plus the UI/evaluation working tree, subsequently pushed as `a0ed32d`. The teacher-account update below adds further changes. This is not a signed release attestation.
 
 ## Teacher-account update

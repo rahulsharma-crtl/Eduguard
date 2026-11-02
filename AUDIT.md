@@ -1,6 +1,6 @@
 # EduGuard Cloud Architecture & Reliability Audit Report
 
-> Historical baseline: implementation status and remaining deployment/data requirements are tracked in [REMEDIATION.md](REMEDIATION.md). The original findings below describe the audited version.
+> **Historical snapshot — original October 30, 2026 audit.** Findings, file paths, architecture and defect descriptions below apply to that audited version, not necessarily current code. Preserved as evidence; this is not current setup guidance or a readiness claim. See [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md), [README.md](README.md) and [PRIVACY.md](PRIVACY.md) for the current runtime and operating guidance.
 
 **Date:** October 30, 2026  
 **Auditor:** Senior Full-Stack AI Engineer & Software Reliability Specialist  

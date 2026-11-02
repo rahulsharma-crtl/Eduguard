@@ -7,3 +7,6 @@ select,summary,.table-wrap:focus-visible{outline-offset:4px}select:focus-visible
 @media(max-width:520px){.app-shell{padding:0 16px}header{height:80px}.brand{font-size:21px}.privacy-tag{display:none}.intro h1{font-size:34px}.entry-card{padding:20px}.classroom-heading,.panel-heading{align-items:flex-start;flex-direction:column;gap:6px}.classroom-heading>button{margin-bottom:18px}.metric-grid{grid-template-columns:1fr}.metric-grid>div{display:flex;align-items:center;justify-content:space-between}.metric-grid strong{margin:0}.report-panel{padding:14px}.invitation{padding:14px}footer{line-height:1.8}.roster-filters{gap:0}.guidance{padding:12px}input,select{font-size:16px}}
 
 .auth-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.auth-tabs [aria-pressed="true"]{background:#b2a4ff;color:#1c1732}.recovery-code{display:block;overflow-wrap:anywhere;padding:18px;background:#0d1320;border:1px solid #b2a4ff;border-radius:8px;font-size:16px}.room-choice{display:block;margin:8px 0;width:100%;text-align:left}
+
+/* Only the optional research landing-page link; classroom controls are unaffected. */
+.research-entry{max-width:45%;text-align:center;flex-shrink:1}

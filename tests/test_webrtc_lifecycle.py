@@ -1,7 +1,9 @@
 """
-Integration & static verification tests for EduGuard WebRTC/Audio Lifecycle.
+Static source-text checks for EduGuard WebRTC/Audio Lifecycle.
 Validates race condition fixes, readiness states, teacher roster audio bug,
-core privacy architecture, bounded reconnection, and resolution labels.
+source-level privacy guards, bounded reconnection, and resolution labels.
+These checks do not execute a browser or inspect actual transmitted tracks;
+tests/browser/webrtc.test.mjs covers current browser sender behavior.
 """
 
 import os
@@ -57,7 +59,7 @@ def test_student_room_bounded_reconnection():
 
 
 def test_student_room_privacy_architecture():
-    """Verify student transmits synthetic canvas + mic only, not raw webcam."""
+    """Check source guards for canvas video and exclusion of student mic tracks."""
     content = read_file(STUDENT_HTML)
     assert 'id="raw_webcam" style="display: none;"' in content
     assert "virtualCanvasStream = privacyCanvas.captureStream" in content

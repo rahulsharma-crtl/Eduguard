@@ -1,5 +1,7 @@
 # Remediation and Streamlit removal
 
+> **Historical migration/remediation snapshot.** The implementation/status table below records an earlier stage of the migration. Its sessionStorage queue, tab-close recovery, audio-sharing and pending-deployment statements have been superseded; they are not current requirements. See [CURRENT_ARCHITECTURE.md](CURRENT_ARCHITECTURE.md), [SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md), [AUDIO_OBSERVATIONS.md](AUDIO_OBSERVATIONS.md) and [TEACHER_ACCOUNTS.md](TEACHER_ACCOUNTS.md). Original entries are preserved for traceability.
+
 The app now runs on React/Vite + FastAPI + PeerJS, with PostgreSQL for hosted persistence. The old Streamlit runtime, Python UI wrappers, component protocol, and setup scripts have been removed. See [README.md](README.md) for setup, limits, and deployment.
 
 | Request | Current implementation |
