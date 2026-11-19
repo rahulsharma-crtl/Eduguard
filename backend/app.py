@@ -42,15 +42,18 @@ class Settings:
     signaling_url: str
     retention_days: int = 7
     ice_servers_json: str = '[{"urls":"stun:stun.l.google.com:19302"}]'
+    origin_regex: str | None = None
 
     @classmethod
     def from_env(cls):
+        origin_regex = os.getenv('ALLOWED_ORIGIN_REGEX', r'https://.*\.vercel\.app') or None
         return cls(os.getenv('DATABASE_URL', 'sqlite:///eduguard_api.db'),
                    os.getenv('AUTH_SIGNING_KEY', ''), os.getenv('TEACHER_ADMIN_PASSWORD', ''),
                    [x.strip() for x in os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if x.strip()],
                    os.getenv('SIGNALING_URL', 'http://localhost:9000'),
                    int(os.getenv('RETENTION_DAYS', '7')),
-                   os.getenv('ICE_SERVERS_JSON', '[{"urls":"stun:stun.l.google.com:19302"}]'))
+                   os.getenv('ICE_SERVERS_JSON', '[{"urls":"stun:stun.l.google.com:19302"}]'),
+                   origin_regex)
 
 
 class CreateRoom(BaseModel):
@@ -130,6 +133,7 @@ def create_app(settings=None):
 
     app = FastAPI(title='EduGuard API', lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=settings.origins,
+                       allow_origin_regex=settings.origin_regex,
                        allow_methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type'])
     @app.middleware('http')
     async def private_responses(request, call_next):

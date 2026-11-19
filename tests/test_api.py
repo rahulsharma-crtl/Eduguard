@@ -94,11 +94,20 @@ def test_login_rate_limit_and_no_default_password(client):
     assert client.post('/rooms',json={'name':'Math','password':'admin123'}).status_code==429
 
 
-def test_cors_only_allows_configured_frontend(client):
+def test_cors_only_allows_configured_frontend(client, monkeypatch):
     allowed=client.options('/rooms',headers={'Origin':'https://class.example','Access-Control-Request-Method':'POST'})
     assert allowed.headers['access-control-allow-origin']=='https://class.example'
     blocked=client.options('/rooms',headers={'Origin':'https://attacker.example','Access-Control-Request-Method':'POST'})
     assert 'access-control-allow-origin' not in blocked.headers
+
+    # Test default Vercel regex support in from_env
+    monkeypatch.setenv('AUTH_SIGNING_KEY', 's' * 48)
+    env_app = create_app(Settings.from_env())
+    with TestClient(env_app) as env_client:
+        vercel_allowed = env_client.options('/config', headers={'Origin':'https://eduguardapp-4e7zhse8g-rahuls-projects-421674f8.vercel.app', 'Access-Control-Request-Method':'GET'})
+        assert vercel_allowed.headers['access-control-allow-origin'] == 'https://eduguardapp-4e7zhse8g-rahuls-projects-421674f8.vercel.app'
+        attacker_blocked = env_client.options('/config', headers={'Origin':'https://attacker.com', 'Access-Control-Request-Method':'GET'})
+        assert 'access-control-allow-origin' not in attacker_blocked.headers
 
 
 def test_student_leave_and_csv_formula_escaping(client):
