@@ -22,7 +22,18 @@ async function request(path,{token,body,raw=false,keepalive=false,signal}={}) {
     const response=await fetch(`${API}${path}`,{method:body===undefined?'GET':'POST',
         headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}),...(token?{Authorization:`Bearer ${token}`}:{})},
         body:body===undefined?undefined:JSON.stringify(body),keepalive,signal:signal||AbortSignal.timeout(20000)});
-    if(!response.ok){const data=await response.json().catch(()=>({}));const error=Error(typeof data.detail==='string'?data.detail:`Request failed (${response.status})`);error.status=response.status;throw error;}
+    if(!response.ok){
+        const data=await response.json().catch(()=>({}));
+        let message=`Request failed (${response.status})`;
+        if(typeof data.detail==='string'){
+            message=data.detail;
+        }else if(Array.isArray(data.detail)){
+            message=data.detail.map(d=>d.msg?`${d.loc?.slice(-1)[0]||'Field'}: ${d.msg}`:JSON.stringify(d)).join('; ');
+        }
+        const error=Error(message);
+        error.status=response.status;
+        throw error;
+    }
     return raw?response:response.json();
 }
 
