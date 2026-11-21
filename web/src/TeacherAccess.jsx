@@ -5,10 +5,24 @@ export function TeacherAccess({request,onSession,enabled}){
  const [account,setAccount]=useState(restore),[pendingAccount,setPendingAccount]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[name,setName]=useState(''),[rooms,setRooms]=useState([]);
  function accept(value){const saved={username:value.username,account_token:value.account_token,expires_at:value.expires_at};sessionStorage.setItem('eduguard-teacher-account',JSON.stringify(saved));setAccount(saved);setPendingAccount(null)}
  function signOut(){sessionStorage.removeItem('eduguard-teacher-account');setAccount(null);setRooms([]);setMode('login');setPassword('');setConfirm('');setRecovery('')}
- function fail(error){setError(error.message);if(error.status===401&&account)signOut()}
+ function fail(error){
+  let msg=error.message;
+  if(error.status===401&&mode==='login'){
+    msg="Incorrect username or password. If you haven't created your account yet, click 'Create account' first.";
+  }
+  setError(msg);
+  if(error.status===401&&account)signOut()
+ }
  useEffect(()=>{let active=true;if(account)request('/teachers/rooms',{token:account.account_token}).then(data=>{if(active)setRooms(data.rooms)}).catch(error=>{if(active)fail(error)});return()=>{active=false}},[account]);
  async function authenticate(event){event.preventDefault();setError('');if(mode!=='login'&&password!==confirm){setError('Passwords do not match.');return}setBusy(true);
- try{const data=await request(`/teachers/${mode==='register'?'register':mode==='recover'?'recover':'login'}`,{body:{username,password,...(mode==='recover'?{recovery_code:recovery}:{})}});setPassword('');setConfirm('');setRecovery('');if(data.recovery_code)setPendingAccount(data);else accept(data)}catch(error){fail(error)}finally{setBusy(false)}}
+ try{
+  const cleanUsername=username.trim();
+  const data=await request(`/teachers/${mode==='register'?'register':mode==='recover'?'recover':'login'}`,{body:{username:cleanUsername,password,...(mode==='recover'?{recovery_code:recovery.trim()}:{})}});
+  setPassword('');setConfirm('');setRecovery('');
+  if(data.recovery_code)setPendingAccount(data);
+  else accept(data)
+ }catch(error){fail(error)}finally{setBusy(false)}
+}
  async function launch(event){event.preventDefault();setBusy(true);setError('');try{onSession(await request('/rooms',{token:account.account_token,body:{name}}))}catch(error){fail(error)}finally{setBusy(false)}}
  async function reopen(id){setBusy(true);setError('');try{onSession(await request(`/rooms/${id}/teacher-resume`,{token:account.account_token,body:{}}))}catch(error){fail(error)}finally{setBusy(false)}}
  return <div>{error&&<p role="alert" className="notice error">{error}</p>}
@@ -16,7 +30,7 @@ export function TeacherAccess({request,onSession,enabled}){
  :account?<><p>Signed in as <strong>{account.username}</strong> <button type="button" className="secondary" onClick={signOut}>Sign out</button></p><form onSubmit={launch} aria-busy={busy}><label>Classroom name<input required maxLength={100} value={name} onChange={event=>setName(event.target.value)} placeholder="e.g. Mathematics"/></label><button className="primary" disabled={busy||!enabled}>{busy?'Opening…':'Launch classroom →'}</button></form>{rooms.length>0&&<section aria-label="Your retained classrooms"><h3>Your retained classrooms</h3>{rooms.map(room=><button className="secondary room-choice" key={room.id} disabled={busy} onClick={()=>reopen(room.id)}>Open {room.name}{room.closed?' (ended)':''}</button>)}</section>}</>
  :<><div className="auth-tabs" aria-label="Teacher account options">{[['login','Sign in'],['register','Create account'],['recover','Reset password']].map(([value,label])=><button type="button" key={value} className="secondary" aria-pressed={mode===value} disabled={busy} onClick={()=>{setMode(value);setPassword('');setConfirm('');setRecovery('');setError('')}}>{label}</button>)}</div>
  <h3>{mode==='register'?'Choose your own teacher password':mode==='recover'?'Use your saved recovery code':'Welcome back'}</h3>
- <form onSubmit={authenticate} aria-busy={busy}><label>Teacher username<input name="username" autoComplete="username" required minLength={3} maxLength={64} pattern="[a-zA-Z0-9_\\-\\.]+" value={username} onChange={event=>setUsername(event.target.value)} aria-describedby="username-help"/></label><p className="small" id="username-help">3–64 letters, numbers, dots, underscores or hyphens. Choose an alias rather than an email address. Usernames are case-insensitive.</p>
+ <form onSubmit={authenticate} aria-busy={busy}><label>Teacher username<input name="username" autoComplete="username" required minLength={3} maxLength={64} pattern="[a-zA-Z0-9_\\-\\.\\@\\+]+" value={username} onChange={event=>setUsername(event.target.value)} aria-describedby="username-help"/></label><p className="small" id="username-help">3–64 characters (letters, numbers, dots, underscores, hyphens, or email). Usernames are case-insensitive.</p>
  {mode==='recover'&&<label>Recovery code<input required autoComplete="off" value={recovery} onChange={event=>setRecovery(event.target.value)}/></label>}
  <label>{mode==='login'?'Teacher password':'New teacher password'}<input name="password" type="password" required minLength={mode==='login'?1:6} maxLength={128} autoComplete={mode==='login'?'current-password':'new-password'} value={password} onChange={event=>setPassword(event.target.value)} aria-describedby="password-save-help"/></label>
  {mode!=='login'&&<label>Confirm password<input name="password-confirmation" type="password" required minLength={6} maxLength={128} autoComplete="new-password" value={confirm} onChange={event=>setConfirm(event.target.value)}/></label>}

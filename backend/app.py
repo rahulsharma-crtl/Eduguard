@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from sqlalchemy import select, update, delete
 from sqlalchemy.exc import IntegrityError
 from backend.passwords import password_hash, verify_password, recovery_hash
@@ -63,8 +63,15 @@ class CreateRoom(BaseModel):
 
 class TeacherCredentials(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    username: str = Field(min_length=3, max_length=64, pattern=r'^[a-zA-Z0-9_.-]+$')
+    username: str = Field(min_length=3, max_length=64, pattern=r'^[a-zA-Z0-9_.\-@+]+$')
     password: str = Field(min_length=1, max_length=128)
+
+    @field_validator('username', mode='before')
+    @classmethod
+    def strip_username(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class TeacherRecovery(TeacherCredentials):
