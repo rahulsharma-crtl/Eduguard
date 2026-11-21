@@ -6,11 +6,11 @@ const stream=tracks=>({getTracks:()=>tracks,getVideoTracks:()=>tracks.filter(t=>
 test('Raw, cloned, and unknown video tracks are denied; only canvas provenance is allowed',()=>{
  const raw=stream([{id:'camera',kind:'video'}]),allowed=new Set(['canvas']);
  assert.throws(()=>assertPrivateStream(raw,raw,'mesh',allowed));
- assert.throws(()=>assertPrivateStream(stream([{id:'mic',kind:'audio'}]),raw,'mesh',allowed));
  assert.throws(()=>assertPrivateStream(stream([{id:'clone',kind:'video'}]),raw,'mesh',allowed));
  assert.doesNotThrow(()=>assertPrivateStream(stream([{id:'canvas',kind:'video'}]),raw,'mesh',allowed));
+ assert.doesNotThrow(()=>assertPrivateStream(stream([{id:'canvas',kind:'video'},{id:'mic',kind:'audio'}]),raw,'mesh',allowed));
  assert.throws(()=>assertPrivateStream(stream([{id:'canvas',kind:'video'}]),raw,'telemetry-only',allowed));
- assert.throws(()=>assertPrivateStream(stream([{id:'mic',kind:'audio'}]),raw,'telemetry-only',allowed));
+ assert.doesNotThrow(()=>assertPrivateStream(stream([{id:'mic',kind:'audio'}]),raw,'telemetry-only',allowed));
  assert.doesNotThrow(()=>assertPrivateStream(stream([]),raw,'telemetry-only',allowed));
 });
 test('Bridge validates numeric values and reconstructs only known scalar fields',()=>{

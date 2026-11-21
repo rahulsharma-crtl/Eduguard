@@ -2,6 +2,18 @@ import React from 'react';
 
 export const percent = value => Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : 'Unknown';
 export const duration = value => Number.isFinite(value) ? `${Math.floor(value / 60)}m ${Math.floor(value % 60)}s` : 'Unknown';
+export function friendlyStatus(status, unknown = false) {
+    if (unknown || !status) return 'Not detected';
+    const s = String(status);
+    if (/Drowsy|Eyes closed/i.test(s)) return 'Drowsy';
+    if (/Absent|Face not detected|Face repeatedly not detected/i.test(s)) return 'Away / Inactive';
+    if (/Attentive|Face oriented toward camera/i.test(s)) return 'Attentive';
+    if (/Distraction|Looking away|Repeated head turns/i.test(s)) return 'Looking away';
+    if (/Low Engagement|Moderate Attention|Mixed/i.test(s)) return 'Distracted';
+    if (/No Scored|unavailable/i.test(s)) return 'No data';
+    return s;
+}
+
 export function observationLabel(status, unknown = false) {
     if (unknown || !status) return 'Observation unavailable';
     return String(status).replace(/Drowsy \(Eyes Closed\)/gi, 'Eyes closed')
