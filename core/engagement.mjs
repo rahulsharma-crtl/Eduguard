@@ -1273,9 +1273,9 @@ export function multimodalObservation(visual, audio) {
 export function assertPrivateStream(stream, rawStream, mode, canvasTrackIds) {
     const tracks=stream.getTracks();
     const rawIds=new Set((rawStream?.getVideoTracks() || []).map(track=>track.id));
-    if (tracks.some(track=>track.kind==='audio')) throw Error('Student microphone is local-only');
     if (tracks.some(track=>track.kind==='video' && (rawIds.has(track.id)||!canvasTrackIds.has(track.id))))
         throw Error('Blocked non-canvas student video track');
-    if (mode==='telemetry-only' && tracks.length) throw Error('Telemetry-only must not send media tracks');
+    if (mode==='telemetry-only' && tracks.some(track=>track.kind==='video'))
+        throw Error('Telemetry-only must not send video tracks');
     return stream;
 }

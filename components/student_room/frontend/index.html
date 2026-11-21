@@ -424,7 +424,7 @@
                     <canvas id="privacy_canvas" width="640" height="480"></canvas>
 
                     <div class="privacy-pill">
-                        <span>🔒</span> Student video sharing follows your selected mode. Optional microphone analysis stays local.
+                        <span>🔒</span> Raw camera video stays private on your device. Click Mute Mic to mute or speak.
                     </div>
                     <div class="feed-overlay">
                         <span id="kinematics_tag">🧑‍🎓 Privacy Mesh Active</span>
@@ -441,28 +441,28 @@
         <!-- Bottom Telemetry HUD Strip -->
         <div class="telemetry-strip">
             <div class="metric-cell">
-                <span class="metric-label">Visual heuristic</span>
+                <span class="metric-label">Attention Score</span>
                 <span class="metric-value" id="val_cei">Unknown</span>
                 <div class="metric-progress">
                     <div class="progress-bar" id="bar_cei" style="width: 0%;"></div>
                 </div>
             </div>
             <div class="metric-cell">
-                <span class="metric-label">Head orientation heuristic</span>
+                <span class="metric-label">Head Position</span>
                 <span class="metric-value" id="val_att">Unknown</span>
                 <div class="metric-progress">
                     <div class="progress-bar" id="bar_att" style="width: 0%; background: var(--success-color);"></div>
                 </div>
             </div>
             <div class="metric-cell">
-                <span class="metric-label">Eye Aspect Ratio (EAR)</span>
+                <span class="metric-label">Eye Openness</span>
                 <span class="metric-value" id="val_ear">Unknown</span>
                 <div class="metric-progress">
                     <div class="progress-bar" id="bar_ear" style="width: 0%; background: #00E5FF;"></div>
                 </div>
             </div>
             <div class="metric-cell">
-                <span class="metric-label">Visual observation</span>
+                <span class="metric-label">Current Status</span>
                 <span class="metric-value" id="val_status" style="font-size: 1.05rem; color: #4ade80;">Awaiting observation</span>
             </div>
         </div>
@@ -599,6 +599,7 @@
         const audioObservationLabel = document.createElement('span');
         audioObservationLabel.textContent = 'Analysis off; microphone unavailable until permission is granted.';
         audioAnalysisLabel.appendChild(audioObservationLabel);
+        audioAnalysisLabel.style.display = 'none';
         document.getElementById('main_container').prepend(audioAnalysisLabel);
         audioAnalysisToggle.addEventListener('change', async () => {
             if (!audioAnalysisToggle.checked) { audioContext?.suspend(); localUserMedia?.getAudioTracks().forEach(track => {track.stop();localUserMedia.removeTrack(track)}); return; }
@@ -913,10 +914,18 @@
             const requestedGeneration = ++inferenceGeneration;
             localStreamInitPromise = (async () => {
                 try {
-                    localUserMedia = await navigator.mediaDevices.getUserMedia({
-                        video: { width: 640, height: 480, frameRate: { ideal: 30 } },
-                        audio: false
-                    });
+                    try {
+                        localUserMedia = await navigator.mediaDevices.getUserMedia({
+                            video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                        });
+                    } catch (audioErr) {
+                        console.warn("Could not acquire microphone along with camera, attempting video-only:", audioErr);
+                        localUserMedia = await navigator.mediaDevices.getUserMedia({
+                            video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                            audio: false
+                        });
+                    }
                     if (requestedGeneration !== inferenceGeneration) { localUserMedia.getTracks().forEach(track=>track.stop()); localUserMedia=null; return; }
                     rawWebcam.srcObject = localUserMedia;
                     await rawWebcam.play();
@@ -1195,7 +1204,13 @@
             console.log(`Initiating outbound WebRTC call to teacher: ${teacherPeerId}`);
 
             try {
-                const outbound = privacyMode === 'telemetry-only' ? new MediaStream() : virtualCanvasStream;
+                const outbound = new MediaStream();
+                if (privacyMode === 'mesh' && virtualCanvasStream) {
+                    virtualCanvasStream.getVideoTracks().forEach(track => outbound.addTrack(track));
+                }
+                if (localUserMedia) {
+                    localUserMedia.getAudioTracks().forEach(track => outbound.addTrack(track));
+                }
                 EduGuardEngagement.assertPrivateStream(outbound, localUserMedia, privacyMode, canvasTrackIds);
                 activeCall = peer.call(teacherPeerId, outbound, {constraints:{offerToReceiveAudio:true,offerToReceiveVideo:true},metadata: { studentName: currentStudentName, privacyMode } });
             } catch (err) {
@@ -1419,9 +1434,33 @@
             updateLecturerMuteState(isMuted);
         });
 
-        toggleStudentMicBtn.addEventListener("click", () => {
+        async function toggleStudentMic() {
             if (!localUserMedia) return;
-            const audioTracks = localUserMedia.getAudioTracks();
+            let audioTracks = localUserMedia.getAudioTracks();
+            if (audioTracks.length === 0) {
+                try {
+                    const micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                    });
+                    const newTrack = micStream.getAudioTracks()[0];
+                    if (newTrack) {
+                        localUserMedia.addTrack(newTrack);
+                        audioTracks = [newTrack];
+                        if (activeCall?.peerConnection) {
+                            const sender = activeCall.peerConnection.getSenders().find(s => s.track?.kind === 'audio');
+                            if (sender) {
+                                sender.replaceTrack(newTrack);
+                            } else {
+                                activeCall.peerConnection.addTrack(newTrack, localUserMedia);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Microphone access could not be acquired:", err);
+                    alert("Microphone permission was not granted.");
+                    return;
+                }
+            }
             if (audioTracks.length > 0) {
                 const audioTrack = audioTracks[0];
                 audioTrack.enabled = !audioTrack.enabled;
@@ -1433,7 +1472,8 @@
                     toggleStudentMicBtn.innerHTML = `<span>🔇</span> Unmute Mic`;
                 }
             }
-        });
+        }
+        toggleStudentMicBtn.addEventListener("click", toggleStudentMic);
 
         // Neutral pose calibration is explicit and local to this tab.
         let calibrationSamples = null;
