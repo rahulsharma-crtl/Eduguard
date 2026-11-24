@@ -424,15 +424,15 @@
                     <canvas id="privacy_canvas" width="640" height="480"></canvas>
 
                     <div class="privacy-pill">
-                        <span>🔒</span> Raw camera video stays private on your device. Click Mute Mic to mute or speak.
+                        <span>🔒</span> Raw camera video stays private on your device. Click Unmute Mic to speak.
                     </div>
                     <div class="feed-overlay">
                         <span id="kinematics_tag">🧑‍🎓 Privacy Mesh Active</span>
                     </div>
                 </div>
                 <div class="controls-toolbar">
-                    <button id="toggle_student_mic_btn" class="ctrl-btn">
-                        <span id="mic_icon">🎙️</span> Mute Mic
+                    <button id="toggle_student_mic_btn" class="ctrl-btn off" aria-label="Unmute microphone">
+                        <span id="mic_icon">🔇</span> Unmute Mic
                     </button>
                 </div>
             </div>
@@ -681,6 +681,7 @@
         if (typeof EduGuardEngagement !== 'undefined' && EduGuardEngagement.EngagementEngine) {
             engagementEngine = new EduGuardEngagement.EngagementEngine();
         }
+        let consecutiveUnknownWithFace = 0;
 
         // --- 3. MediaPipe FaceMesh & Canvas Anonymization Loop ---
         function onFaceMeshResults(results) {
@@ -816,6 +817,21 @@
                 }
             }
 
+            // Auto-recovery from stale displacement / jitter lockout:
+            // When face landmarks are clearly tracked by MediaPipe (user is in frame),
+            // but the internal displacement reference got stuck in excessive_jitter
+            // following head repositioning or posture shifts, advance the reference to
+            // current settled landmarks after 4 consecutive unknown frames (~400ms).
+            if (landmarks && frameAnalysis.is_unknown) {
+                consecutiveUnknownWithFace++;
+                if (consecutiveUnknownWithFace >= 4 && engagementEngine) {
+                    engagementEngine.prevLandmarks = landmarks;
+                    consecutiveUnknownWithFace = 0;
+                }
+            } else {
+                consecutiveUnknownWithFace = 0;
+            }
+
             // Represent lecturer audio muted as separate UI state (never as an artificial CEI penalty)
             if (isLecturerAudioSilenced) {
                 kinematicsTag.innerText += " (🔇 Lecture Muted)";
@@ -927,6 +943,8 @@
                         });
                     }
                     if (requestedGeneration !== inferenceGeneration) { localUserMedia.getTracks().forEach(track=>track.stop()); localUserMedia=null; return; }
+                    // Start with student mic muted by default to prevent unexpected noise, room feedback, or echoing voices
+                    localUserMedia.getAudioTracks().forEach(track => { track.enabled = false; });
                     rawWebcam.srcObject = localUserMedia;
                     await rawWebcam.play();
                     readinessState.webcam = 'ready';
