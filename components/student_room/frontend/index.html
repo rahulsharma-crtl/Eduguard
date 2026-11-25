@@ -424,15 +424,15 @@
                     <canvas id="privacy_canvas" width="640" height="480"></canvas>
 
                     <div class="privacy-pill">
-                        <span>🔒</span> Raw camera video stays private on your device. Click Unmute Mic to speak.
+                        <span>🔒</span> Raw camera video and microphone audio stay private on your device.
                     </div>
                     <div class="feed-overlay">
                         <span id="kinematics_tag">🧑‍🎓 Privacy Mesh Active</span>
                     </div>
                 </div>
                 <div class="controls-toolbar">
-                    <button id="toggle_student_mic_btn" class="ctrl-btn off" aria-label="Unmute microphone">
-                        <span id="mic_icon">🔇</span> Unmute Mic
+                    <button id="toggle_student_mic_btn" class="ctrl-btn off" aria-label="Enable local microphone analysis">
+                        <span id="mic_icon">🔇</span> Enable local mic analysis
                     </button>
                 </div>
             </div>
@@ -601,8 +601,25 @@
         audioAnalysisLabel.appendChild(audioObservationLabel);
         audioAnalysisLabel.style.display = 'none';
         document.getElementById('main_container').prepend(audioAnalysisLabel);
-        audioAnalysisToggle.addEventListener('change', async () => {
-            if (!audioAnalysisToggle.checked) { audioContext?.suspend(); localUserMedia?.getAudioTracks().forEach(track => {track.stop();localUserMedia.removeTrack(track)}); return; }
+        let audioSource = null;
+        function setLocalMicButton(enabled) {
+            toggleStudentMicBtn.classList.toggle("off", !enabled);
+            toggleStudentMicBtn.setAttribute('aria-label', enabled ? 'Disable local microphone analysis' : 'Enable local microphone analysis');
+            toggleStudentMicBtn.innerHTML = enabled ? `<span>🎙️</span> Disable local mic analysis` : `<span>🔇</span> Enable local mic analysis`;
+        }
+        async function setLocalAudioAnalysis(enabled) {
+            audioAnalysisToggle.checked = enabled;
+            if (!enabled) {
+                audioSource?.disconnect();
+                audioAnalyser?.disconnect();
+                audioSource = null;
+                audioAnalyser = null;
+                if (audioContext) { await audioContext.close().catch(() => {}); audioContext = null; }
+                localUserMedia?.getAudioTracks().forEach(track => { track.stop(); localUserMedia.removeTrack(track); });
+                audioObservationLabel.textContent = 'Analysis off; microphone unavailable until permission is granted.';
+                setLocalMicButton(false);
+                return;
+            }
             try {
                 if (!localUserMedia?.getAudioTracks().some(track => track.readyState === 'live')) {
                     const requestedGeneration = inferenceGeneration;
@@ -615,13 +632,18 @@
                     audioContext = new AudioClass();
                     audioAnalyser = audioContext.createAnalyser();
                     audioAnalyser.fftSize = 2048;
-                    audioContext.createMediaStreamSource(localUserMedia).connect(audioAnalyser);
+                    audioSource = audioContext.createMediaStreamSource(localUserMedia);
+                    audioSource.connect(audioAnalyser);
                 }
                 await audioContext.resume();
+                setLocalMicButton(true);
             } catch (_) {
                 audioObservationLabel.textContent = 'Audio unavailable; no vocal inference.';
+                audioAnalysisToggle.checked = false;
+                setLocalMicButton(false);
             }
-        });
+        }
+        audioAnalysisToggle.addEventListener('change', () => setLocalAudioAnalysis(audioAnalysisToggle.checked));
         let audioAlertStatus = "Unknown";
 
         function setConnectionStatus(type, msg) {
@@ -631,9 +653,9 @@
 
         function updateOverallStatus() {
             if (readinessState.webcam === 'error') {
-                setConnectionStatus("alert", "Camera & Microphone Permission Denied");
+                setConnectionStatus("alert", "Camera permission denied");
             } else if (readinessState.webcam === 'requesting') {
-                setConnectionStatus("connecting", "Requesting Camera & Mic Access...");
+                setConnectionStatus("connecting", "Requesting camera access...");
             } else if (readinessState.canvasStream !== 'ready') {
                 setConnectionStatus("connecting", "Preparing Privacy Mesh Stream...");
             } else if (readinessState.peerSignaling === 'connecting') {
@@ -681,7 +703,6 @@
         if (typeof EduGuardEngagement !== 'undefined' && EduGuardEngagement.EngagementEngine) {
             engagementEngine = new EduGuardEngagement.EngagementEngine();
         }
-        let consecutiveUnknownWithFace = 0;
 
         // --- 3. MediaPipe FaceMesh & Canvas Anonymization Loop ---
         function onFaceMeshResults(results) {
@@ -726,7 +747,7 @@
             let isSpeechDetected = false;
             let audioRMS = 0.0;
             const audioTrack = (localUserMedia && localUserMedia.getAudioTracks().length > 0) ? localUserMedia.getAudioTracks()[0] : null;
-            const isMicMuted = Boolean(audioTrack && !audioTrack.enabled);
+            const isMicMuted = !audioTrack || !audioTrack.enabled;
 
             let localAudioSamples = null;
             if (audioAnalysisToggle.checked && audioAnalyser && !isMicMuted && audioContext?.state === 'running') {
@@ -753,17 +774,17 @@
                 isMicMuted: isMicMuted,
                 isSpeechDetected: isSpeechDetected
             }) : {
-                quality: landmarks ? 'valid' : 'absent',
-                is_quality_sufficient: Boolean(landmarks),
-                is_unknown: false,
-                presence: landmarks ? 1.0 : 0.0,
-                attentiveness: landmarks ? 1.0 : 0.0,
-                distraction: 0.0,
-                ear: 0.32,
-                raw_cei: landmarks ? 1.0 : 0.0,
-                smoothed_cei: landmarks ? 1.0 : 0.0,
-                cei_score: landmarks ? 1.0 : 0.0,
-                status: landmarks ? "Attentive" : "Subject Absent",
+                quality: 'unavailable',
+                is_quality_sufficient: false,
+                is_unknown: true,
+                presence: null,
+                attentiveness: null,
+                distraction: null,
+                ear: null,
+                raw_cei: null,
+                smoothed_cei: null,
+                cei_score: null,
+                status: 'Observation unavailable',
                 is_drowsy: false,
                 is_looking_away: false,
                 is_looking_down: false,
@@ -772,7 +793,8 @@
                 is_mic_muted: isMicMuted,
                 is_lecturer_audio_muted: isLecturerAudioSilenced,
                 audio_status: isLecturerAudioSilenced ? "Lecturer Audio Muted" : (isMicMuted ? "Mic Muted" : "Active"),
-                audio_evasion: false
+                audio_evasion: false,
+                quality_reason: 'engagement_engine_unavailable'
             };
 
             // Update UI HUD
@@ -815,21 +837,6 @@
                     valStatus.style.color = "var(--success-color)";
                     kinematicsTag.innerText = "Face oriented toward camera";
                 }
-            }
-
-            // Auto-recovery from stale displacement / jitter lockout:
-            // When face landmarks are clearly tracked by MediaPipe (user is in frame),
-            // but the internal displacement reference got stuck in excessive_jitter
-            // following head repositioning or posture shifts, advance the reference to
-            // current settled landmarks after 4 consecutive unknown frames (~400ms).
-            if (landmarks && frameAnalysis.is_unknown) {
-                consecutiveUnknownWithFace++;
-                if (consecutiveUnknownWithFace >= 4 && engagementEngine) {
-                    engagementEngine.prevLandmarks = landmarks;
-                    consecutiveUnknownWithFace = 0;
-                }
-            } else {
-                consecutiveUnknownWithFace = 0;
             }
 
             // Represent lecturer audio muted as separate UI state (never as an artificial CEI penalty)
@@ -930,21 +937,11 @@
             const requestedGeneration = ++inferenceGeneration;
             localStreamInitPromise = (async () => {
                 try {
-                    try {
-                        localUserMedia = await navigator.mediaDevices.getUserMedia({
-                            video: { width: 640, height: 480, frameRate: { ideal: 30 } },
-                            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                        });
-                    } catch (audioErr) {
-                        console.warn("Could not acquire microphone along with camera, attempting video-only:", audioErr);
-                        localUserMedia = await navigator.mediaDevices.getUserMedia({
-                            video: { width: 640, height: 480, frameRate: { ideal: 30 } },
-                            audio: false
-                        });
-                    }
+                    localUserMedia = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+                        audio: false
+                    });
                     if (requestedGeneration !== inferenceGeneration) { localUserMedia.getTracks().forEach(track=>track.stop()); localUserMedia=null; return; }
-                    // Start with student mic muted by default to prevent unexpected noise, room feedback, or echoing voices
-                    localUserMedia.getAudioTracks().forEach(track => { track.enabled = false; });
                     rawWebcam.srcObject = localUserMedia;
                     await rawWebcam.play();
                     readinessState.webcam = 'ready';
@@ -1226,9 +1223,6 @@
                 if (privacyMode === 'mesh' && virtualCanvasStream) {
                     virtualCanvasStream.getVideoTracks().forEach(track => outbound.addTrack(track));
                 }
-                if (localUserMedia) {
-                    localUserMedia.getAudioTracks().forEach(track => outbound.addTrack(track));
-                }
                 EduGuardEngagement.assertPrivateStream(outbound, localUserMedia, privacyMode, canvasTrackIds);
                 activeCall = peer.call(teacherPeerId, outbound, {constraints:{offerToReceiveAudio:true,offerToReceiveVideo:true},metadata: { studentName: currentStudentName, privacyMode } });
             } catch (err) {
@@ -1454,42 +1448,7 @@
 
         async function toggleStudentMic() {
             if (!localUserMedia) return;
-            let audioTracks = localUserMedia.getAudioTracks();
-            if (audioTracks.length === 0) {
-                try {
-                    const micStream = await navigator.mediaDevices.getUserMedia({
-                        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                    });
-                    const newTrack = micStream.getAudioTracks()[0];
-                    if (newTrack) {
-                        localUserMedia.addTrack(newTrack);
-                        audioTracks = [newTrack];
-                        if (activeCall?.peerConnection) {
-                            const sender = activeCall.peerConnection.getSenders().find(s => s.track?.kind === 'audio');
-                            if (sender) {
-                                sender.replaceTrack(newTrack);
-                            } else {
-                                activeCall.peerConnection.addTrack(newTrack, localUserMedia);
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.warn("Microphone access could not be acquired:", err);
-                    alert("Microphone permission was not granted.");
-                    return;
-                }
-            }
-            if (audioTracks.length > 0) {
-                const audioTrack = audioTracks[0];
-                audioTrack.enabled = !audioTrack.enabled;
-                if (audioTrack.enabled) {
-                    toggleStudentMicBtn.classList.remove("off");
-                    toggleStudentMicBtn.innerHTML = `<span>🎙️</span> Mute Mic`;
-                } else {
-                    toggleStudentMicBtn.classList.add("off");
-                    toggleStudentMicBtn.innerHTML = `<span>🔇</span> Unmute Mic`;
-                }
-            }
+            await setLocalAudioAnalysis(!audioAnalysisToggle.checked);
         }
         toggleStudentMicBtn.addEventListener("click", toggleStudentMic);
 

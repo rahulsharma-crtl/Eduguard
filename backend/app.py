@@ -46,7 +46,13 @@ class Settings:
 
     @classmethod
     def from_env(cls):
-        origin_regex = os.getenv('ALLOWED_ORIGIN_REGEX', r'https://.*\.vercel\.app') or None
+        # The default accepts this Vercel project and its preview deployments,
+        # rather than every application hosted on vercel.app. Deployments can
+        # override this via ALLOWED_ORIGIN_REGEX when using a custom domain.
+        origin_regex = os.getenv(
+            'ALLOWED_ORIGIN_REGEX',
+            r'https://(?:eduguardapp\.vercel\.app|eduguardapp-[a-z0-9-]+-rahuls-projects-421674f8\.vercel\.app)'
+        ) or None
         return cls(os.getenv('DATABASE_URL', 'sqlite:///eduguard_api.db'),
                    os.getenv('AUTH_SIGNING_KEY', ''), os.getenv('TEACHER_ADMIN_PASSWORD', ''),
                    [x.strip() for x in os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if x.strip()],

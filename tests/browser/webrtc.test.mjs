@@ -112,14 +112,17 @@ for (const scenario of [{mode:'mesh'},{mode:'telemetry-only'},{mode:'telemetry-o
                 await studentFrame.waitForFunction(n=>window.__mediaAudit.connections.length>n&&document.getElementById('teacher_feed').videoWidth>0&&window.__mediaAudit.connections.some(pc=>pc.connectionState==='connected'),count,{timeout:20000});
             }
             if(scenario.calibrate){await studentFrame.getByRole('button',{name:'Calibrate camera (look straight ahead)',exact:true}).click();await studentFrame.getByRole('button',{name:'Camera calibrated (click to recalibrate)',exact:true}).waitFor({timeout:15000});}
-            await studentFrame.locator('input[type="checkbox"]').check();
-            await studentFrame.waitForFunction(()=>window.__mediaAudit.captures.some(c=>c.audio===true&&c.video===false));
+            if(!scenario.denied){
+                await studentFrame.getByRole('button',{name:'Enable local microphone analysis',exact:true}).click();
+                await studentFrame.waitForFunction(()=>window.__mediaAudit.captures.some(c=>c.audio===true&&c.video===false));
+            }
             const audit=await studentFrame.evaluate(()=>({raw:window.__mediaAudit.raw,canvas:window.__mediaAudit.canvas,
                 sent:window.__mediaAudit.connections.flatMap(pc=>pc.getSenders().map(s=>s.track).filter(Boolean).map(t=>({id:t.id,kind:t.kind})))}));
             assert.ok(audit.sent.every(t=>t.kind!=='video'||(!audit.raw.includes(t.id)&&audit.canvas.includes(t.id))));
+            assert.ok(audit.sent.every(t=>t.kind!=='audio'),'Student microphone must never be attached to WebRTC');
             if(privacyMode==='telemetry-only')assert.equal(audit.sent.length,0);
             else assert.ok(audit.sent.some(t=>t.kind==='video'));
-            await studentFrame.locator('input[type="checkbox"]').uncheck();
+            if(!scenario.denied)await studentFrame.getByRole('button',{name:'Disable local microphone analysis',exact:true}).click();
             assert.ok(audit.sent.every(t=>t.kind!=='audio'));
             assert.deepEqual(uploads,[], 'No HTTP media uploads from standalone student capture');
             console.log('Verified media tracks:',{mode:privacyMode,decoded:media.width,sent:audit.sent});

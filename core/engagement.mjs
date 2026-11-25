@@ -1051,6 +1051,8 @@ export class EngagementEngine {
         this.frameCount = 0;
         this.lastTimestamp = null;
         this.prevLandmarks = null;
+        this.jitterRecoveryCandidate = null;
+        this.consecutiveStableJitterFrames = 0;
 
         this.baselineEAR = null;
         this.calibratedCloseThreshold = this.config.thresholds.fallbackCloseThreshold;
@@ -1096,12 +1098,14 @@ export class EngagementEngine {
         this.frameCount++;
 
         // 1. Observation Quality Assessment
-        const quality = assessFacePresenceQuality(
+        let quality = assessFacePresenceQuality(
             landmarks,
             this.config.dimensions.width,
             this.config.dimensions.height,
             { ...this.config.thresholds, prevLandmarks: this.prevLandmarks }
         );
+
+        quality = this.recoverJitterReference(landmarks, quality);
 
         if (quality.isValid && landmarks) {
             this.prevLandmarks = landmarks;
@@ -1245,6 +1249,58 @@ export class EngagementEngine {
             multiple_faces_detected: Boolean(quality.multipleFacesDetected)
         };
     }
+
+    /*
+     * A large, genuine movement can make the previous landmark reference stale.
+     * Recover only after four consecutive, structurally valid frames whose sole
+     * failure is jitter.  This never accepts clipped, missing, or malformed data.
+     */
+    recoverJitterReference(landmarks, quality) {
+        if (!landmarks || quality.reason !== 'excessive_jitter') {
+            this.jitterRecoveryCandidate = null;
+            this.consecutiveStableJitterFrames = 0;
+            return quality;
+        }
+
+        const structuralQuality = assessFacePresenceQuality(
+            landmarks,
+            this.config.dimensions.width,
+            this.config.dimensions.height,
+            { ...this.config.thresholds, prevLandmarks: null }
+        );
+        if (!structuralQuality.isValid) {
+            this.jitterRecoveryCandidate = null;
+            this.consecutiveStableJitterFrames = 0;
+            return quality;
+        }
+
+        if (!this.jitterRecoveryCandidate) {
+            this.consecutiveStableJitterFrames = 1;
+        } else {
+            const candidateQuality = assessFacePresenceQuality(
+                landmarks,
+                this.config.dimensions.width,
+                this.config.dimensions.height,
+                { ...this.config.thresholds, prevLandmarks: this.jitterRecoveryCandidate }
+            );
+            this.consecutiveStableJitterFrames = candidateQuality.isValid
+                ? this.consecutiveStableJitterFrames + 1
+                : 1;
+        }
+        this.jitterRecoveryCandidate = landmarks;
+
+        if (this.consecutiveStableJitterFrames < 4) return quality;
+
+        this.prevLandmarks = landmarks;
+        this.jitterRecoveryCandidate = null;
+        this.consecutiveStableJitterFrames = 0;
+        return assessFacePresenceQuality(
+            landmarks,
+            this.config.dimensions.width,
+            this.config.dimensions.height,
+            { ...this.config.thresholds, prevLandmarks: this.prevLandmarks }
+        );
+    }
 }
 
 export default EngagementEngine;
@@ -1273,6 +1329,8 @@ export function multimodalObservation(visual, audio) {
 export function assertPrivateStream(stream, rawStream, mode, canvasTrackIds) {
     const tracks=stream.getTracks();
     const rawIds=new Set((rawStream?.getVideoTracks() || []).map(track=>track.id));
+    if (tracks.some(track=>track.kind==='audio'))
+        throw Error('Blocked student audio track');
     if (tracks.some(track=>track.kind==='video' && (rawIds.has(track.id)||!canvasTrackIds.has(track.id))))
         throw Error('Blocked non-canvas student video track');
     if (mode==='telemetry-only' && tracks.some(track=>track.kind==='video'))

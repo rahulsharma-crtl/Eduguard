@@ -106,6 +106,8 @@ def test_cors_only_allows_configured_frontend(client, monkeypatch):
     with TestClient(env_app) as env_client:
         vercel_allowed = env_client.options('/config', headers={'Origin':'https://eduguardapp-4e7zhse8g-rahuls-projects-421674f8.vercel.app', 'Access-Control-Request-Method':'GET'})
         assert vercel_allowed.headers['access-control-allow-origin'] == 'https://eduguardapp-4e7zhse8g-rahuls-projects-421674f8.vercel.app'
+        unrelated_vercel = env_client.options('/config', headers={'Origin':'https://unrelated-project.vercel.app', 'Access-Control-Request-Method':'GET'})
+        assert 'access-control-allow-origin' not in unrelated_vercel.headers
         attacker_blocked = env_client.options('/config', headers={'Origin':'https://attacker.com', 'Access-Control-Request-Method':'GET'})
         assert 'access-control-allow-origin' not in attacker_blocked.headers
 
